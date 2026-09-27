@@ -181,7 +181,7 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-slate-950 text-slate-100 flex flex-col p-0 m-0 select-none relative font-sans">
+    <div className="h-[100dvh] w-full min-h-[100dvh] overflow-hidden bg-slate-950 text-slate-100 flex flex-col p-0 m-0 select-none relative font-sans pl-safe pr-safe">
       {/* Main Full-Screen Game or Lobby Arena */}
       <main className="w-full h-full flex-1 relative flex flex-col overflow-hidden">
         {authLoading ? (

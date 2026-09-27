@@ -26,20 +26,34 @@
   }
 }
 
+/* Safe Area Insets for Notch, Dynamic Island, and Home Indicator */
+.pt-safe {
+  padding-top: max(env(safe-area-inset-top, 0px), 8px);
+}
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
+}
+.pl-safe {
+  padding-left: max(env(safe-area-inset-left, 0px), 4px);
+}
+.pr-safe {
+  padding-right: max(env(safe-area-inset-right, 0px), 4px);
+}
+
 /* Custom scrollbars for modals on touch and desktop */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
   background: rgba(15, 23, 42, 0.6);
   border-radius: 9999px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(0, 240, 255, 0.3);
+  background: rgba(0, 240, 255, 0.35);
   border-radius: 9999px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 240, 255, 0.6);
+  background: rgba(0, 240, 255, 0.65);
 }
 

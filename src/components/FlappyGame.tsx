@@ -48,6 +48,7 @@ import {
   getSectorStage,
   type SectorColorStage,
 } from '../lib/themes';
+import { renderThemeBackground } from '../lib/themeBackgrounds';
 import type { User } from 'firebase/auth';
 
 interface Props {
@@ -149,11 +150,26 @@ export function FlappyGame({
   const [raceWinner, setRaceWinner] = useState<string | 'tie' | null>(null);
   const [rematchLoading, setRematchLoading] = useState(false);
 
-  // Dynamic 10-Point Color Stage Evolution
+  // Dynamic 10-Point Color Stage Evolution or Selected Theme Palette
   const currentSector = getSectorStage(score);
   const baseTheme = CYBER_THEMES[themeId] || CYBER_THEMES.cyberpunk;
-  const activeTheme: SectorColorStage =
-    score >= 10
+  const isCustomTheme = Boolean(themeId && themeId !== 'cyberpunk');
+  const activeTheme: SectorColorStage = isCustomTheme
+    ? {
+        scoreThreshold: Math.floor(score / 10) * 10,
+        sectorName: `${baseTheme.name.toUpperCase()} // SECTOR ${Math.floor(score / 10) + 1}`,
+        headline: score >= 10 ? currentSector.headline : 'READY FOR TAKEOFF!',
+        subtitle: score >= 10 ? currentSector.subtitle : `${baseTheme.name} // Thrusters Engaged`,
+        gatePrimary: baseTheme.gatePrimary,
+        gateSecondary: baseTheme.gateSecondary,
+        gateGlow: baseTheme.gateGlow,
+        gridColor: baseTheme.gridColor,
+        skyTop: baseTheme.skyTop,
+        skyBottom: baseTheme.skyBottom,
+        birdVisor: baseTheme.birdVisor,
+        accent: baseTheme.accent,
+      }
+    : score >= 10
       ? currentSector
       : {
           scoreThreshold: 0,
@@ -1055,53 +1071,17 @@ export function FlappyGame({
       ctx.fillStyle = skyGrad;
       ctx.fillRect(0, -curOffsetY, vWidth, PLAYABLE_HEIGHT + curOffsetY);
 
-      // Cyber Stars & Ion Dust
-      ctx.fillStyle = '#FFFFFF';
-      for (let s = 0; s < 30; s++) {
-        const sx = (s * 87 + (timestamp * 0.015)) % vWidth;
-        const sy = (s * 37 - curOffsetY * 0.5) % (PLAYABLE_HEIGHT - 60);
-        ctx.globalAlpha = 0.2 + (Math.sin(timestamp * 0.002 + s) + 1) * 0.25;
-        ctx.fillRect(sx, sy, s % 3 === 0 ? 2 : 1, s % 3 === 0 ? 2 : 1);
-      }
-      ctx.globalAlpha = 1;
-
-      // Parallax City Skyline
-      const buildings = [
-        { w: 45, h: 140, winRows: 6 },
-        { w: 32, h: 90, winRows: 4 },
-        { w: 60, h: 180, winRows: 8 },
-        { w: 38, h: 110, winRows: 5 },
-        { w: 50, h: 160, winRows: 7 },
-      ];
-      const cityXOffset = bgCityOffset.current % 320;
-      let curBx = -cityXOffset;
-      while (curBx < vWidth + 140) {
-        buildings.forEach((b, idx) => {
-          ctx.fillStyle = '#080C18';
-          ctx.fillRect(curBx, PLAYABLE_HEIGHT - b.h, b.w, b.h);
-
-          // Rooftop antenna
-          ctx.strokeStyle = curTheme.gatePrimary;
-          ctx.lineWidth = 1.2;
-          ctx.beginPath();
-          ctx.moveTo(curBx + b.w / 2, PLAYABLE_HEIGHT - b.h);
-          ctx.lineTo(curBx + b.w / 2, PLAYABLE_HEIGHT - b.h - 15);
-          ctx.stroke();
-
-          // Windows
-          ctx.fillStyle =
-            idx % 2 === 0
-              ? 'rgba(0, 240, 255, 0.25)'
-              : 'rgba(255, 0, 127, 0.25)';
-          for (let r = 0; r < b.winRows; r++) {
-            const wy = PLAYABLE_HEIGHT - b.h + 18 + r * 16;
-            ctx.fillRect(curBx + 6, wy, 5, 7);
-            if (b.w > 40) ctx.fillRect(curBx + 20, wy, 5, 7);
-          }
-
-          curBx += b.w + 12;
-        });
-      }
+      // Render Bespoke Thematic Environment (Synthwave Sun/Mountains, Matrix Rain, Void Singularity, Solar Flares, etc.)
+      renderThemeBackground(
+        ctx,
+        themeId || 'cyberpunk',
+        vWidth,
+        PLAYABLE_HEIGHT,
+        curOffsetY,
+        timestamp,
+        bgCityOffset.current,
+        curTheme
+      );
 
       // Energy Gate Pylons
       pipes.current.forEach((pipe) => {
@@ -1259,13 +1239,13 @@ export function FlappyGame({
         ctx.fillStyle = '#FFFFFF';
         ctx.shadowColor = activeTheme.gatePrimary;
         ctx.shadowBlur = 12;
-        ctx.fillText('CLICK OR TAP [SPACE] TO ENGAGE THRUSTERS', vWidth / 2, 135);
+        ctx.fillText('CLICK OR TAP [SPACE] TO ENGAGE CELESTIAL FLIGHT', vWidth / 2, 135);
 
         ctx.font = 'bold 11px monospace';
         ctx.fillStyle = activeCraft.accentColor;
         ctx.shadowBlur = 0;
         ctx.fillText(
-          `ACTIVE CHASSIS: ${activeCraft.name.toUpperCase()} // ${activeCraft.classType.toUpperCase()}`,
+          `ACTIVE GODDESS: ${activeCraft.name.toUpperCase()} // ${activeCraft.classType.toUpperCase()}`,
           vWidth / 2,
           156
         );
@@ -1398,34 +1378,207 @@ export function FlappyGame({
       ctx.shadowBlur = 0;
     }
 
-    // Goddess Celestial Halo & Divine Aura (Only for Goddess craft or Divine State)
-    if (craft.id === 'goddess' && alive) {
+    // CELESTIAL GODDESS HALO & ASTRAL CROWN (Custom divine halo for every Goddess)
+    if (alive) {
       ctx.save();
-      // Outer celestial aura
-      ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
-      ctx.lineWidth = 3;
-      ctx.shadowColor = '#FFD700';
-      ctx.shadowBlur = 18;
+      // Outer divine aura ring
+      ctx.strokeStyle = craft.accentColor;
+      ctx.globalAlpha = 0.35 + Math.sin(Date.now() * 0.004) * 0.15;
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = craft.accentColor;
+      ctx.shadowBlur = 16;
       ctx.beginPath();
       ctx.arc(0, 0, BIRD_RADIUS + 7, 0, Math.PI * 2);
       ctx.stroke();
 
-      // Floating Astral Halo
-      ctx.strokeStyle = '#FFE066';
-      ctx.lineWidth = 2.2;
-      ctx.shadowColor = '#FFE066';
-      ctx.shadowBlur = 12;
-      ctx.beginPath();
-      ctx.ellipse(0, -BIRD_RADIUS - 7, 14, 4, -0.05, 0, Math.PI * 2);
-      ctx.stroke();
+      const haloY = -BIRD_RADIUS - 8;
 
-      // Halo jewel star
-      ctx.fillStyle = '#00F0FF';
-      ctx.shadowColor = '#00F0FF';
-      ctx.shadowBlur = 8;
-      ctx.beginPath();
-      ctx.arc(0, -BIRD_RADIUS - 7, 2.2, 0, Math.PI * 2);
-      ctx.fill();
+      if (craft.id === 'falcon') {
+        // Valyria // Goddess of Swift Winds: Azure zephyr halo with aerodynamic wind-crest finlets
+        ctx.strokeStyle = '#38BDF8';
+        ctx.lineWidth = 2.2;
+        ctx.shadowColor = '#00F0FF';
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.ellipse(0, haloY, 15, 4.5, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Twin wind-crest fins
+        ctx.strokeStyle = '#00F0FF';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(-15, haloY);
+        ctx.lineTo(-21, haloY - 4);
+        ctx.moveTo(15, haloY);
+        ctx.lineTo(21, haloY - 4);
+        ctx.stroke();
+
+        // Sky-sapphire jewel
+        ctx.fillStyle = '#E0F2FE';
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(0, haloY, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (craft.id === 'phoenix') {
+        // Sol-Ignis // Goddess of Solar Rebirth: Flaming solar corona halo with radiating fire rays
+        ctx.strokeStyle = '#FFAA00';
+        ctx.lineWidth = 2.4;
+        ctx.shadowColor = '#FF4500';
+        ctx.shadowBlur = 15;
+        ctx.beginPath();
+        ctx.ellipse(0, haloY, 15, 4.5, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // 5 Radiating solar corona flame rays
+        ctx.strokeStyle = '#FF3366';
+        ctx.lineWidth = 2;
+        for (let r = -2; r <= 2; r++) {
+          const rx = r * 6;
+          const rayH = 8 - Math.abs(r) * 2;
+          ctx.beginPath();
+          ctx.moveTo(rx, haloY);
+          ctx.lineTo(rx + r * 1.5, haloY - rayH);
+          ctx.stroke();
+        }
+
+        // Solar heart orb
+        ctx.fillStyle = '#FFF3BF';
+        ctx.beginPath();
+        ctx.arc(0, haloY, 3, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (craft.id === 'raven') {
+        // Morrigan // Goddess of the Cosmic Void: Lunar eclipse crescent halo with ultraviolet stardust
+        ctx.strokeStyle = '#C084FC';
+        ctx.lineWidth = 2.4;
+        ctx.shadowColor = '#A855F7';
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.arc(0, haloY, 12, Math.PI * 0.15, Math.PI * 1.25);
+        ctx.stroke();
+
+        // Floating dark void orb
+        ctx.fillStyle = '#0F0B1E';
+        ctx.strokeStyle = '#E879F9';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(0, haloY - 2, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Amethyst starlight point
+        ctx.fillStyle = '#F3E8FF';
+        ctx.fillRect(-1, haloY - 3, 2, 2);
+      } else if (craft.id === 'hummingbird') {
+        // Flora-Zephyr // Goddess of Verdant Bloom: Radiant jade lotus petal halo
+        ctx.strokeStyle = '#10B981';
+        ctx.lineWidth = 2.2;
+        ctx.shadowColor = '#34D399';
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.ellipse(0, haloY, 14, 4.5, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Lotus crown petal spikes
+        ctx.fillStyle = '#6EE7B7';
+        for (let p = -2; p <= 2; p++) {
+          const px = p * 6;
+          const py = haloY - (p === 0 ? 7 : 4);
+          ctx.beginPath();
+          ctx.moveTo(px - 2, haloY);
+          ctx.lineTo(px, py);
+          ctx.lineTo(px + 2, haloY);
+          ctx.fill();
+        }
+
+        // Dewdrop emerald star
+        ctx.fillStyle = '#E6FFFA';
+        ctx.beginPath();
+        ctx.arc(0, haloY, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (craft.id === 'osprey') {
+        // Athena-Aegis // Goddess of Sacred Defense: Golden spiked aegis battle crown with lightning crest
+        ctx.strokeStyle = '#FDE047';
+        ctx.lineWidth = 2.5;
+        ctx.shadowColor = '#F59E0B';
+        ctx.shadowBlur = 15;
+        ctx.beginPath();
+        ctx.ellipse(0, haloY, 16, 5, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Gilded lightning crown crests
+        ctx.strokeStyle = '#F59E0B';
+        ctx.lineWidth = 2;
+        [-10, -4, 4, 10].forEach((lx, idx) => {
+          const lh = idx === 1 || idx === 2 ? 9 : 6;
+          ctx.beginPath();
+          ctx.moveTo(lx, haloY);
+          ctx.lineTo(lx, haloY - lh);
+          ctx.stroke();
+        });
+
+        // Golden aegis node
+        ctx.fillStyle = '#FEF08A';
+        ctx.beginPath();
+        ctx.arc(0, haloY, 3, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (craft.id === 'specter') {
+        // Selene-Phase // Goddess of Astral Mirage: Shimmering iridescent chromatic rainbow halo
+        const rot = Date.now() * 0.002;
+        ctx.strokeStyle = '#00FFA3';
+        ctx.lineWidth = 2.2;
+        ctx.shadowColor = '#22D3EE';
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.ellipse(0, haloY, 15, 4.5, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Orbiting astral star gems
+        for (let s = 0; s < 3; s++) {
+          const a = rot + s * ((Math.PI * 2) / 3);
+          const sx = Math.cos(a) * 16;
+          const sy = haloY + Math.sin(a) * 4.5;
+          ctx.fillStyle = s === 0 ? '#38BDF8' : s === 1 ? '#F472B6' : '#FDE047';
+          ctx.beginPath();
+          ctx.arc(sx, sy, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else {
+        // Aethelia // Supreme Goddess of Games: Triple-tiered golden halos with 5-pointed divine crown
+        ctx.strokeStyle = '#FFE066';
+        ctx.lineWidth = 2.4;
+        ctx.shadowColor = '#FFD700';
+        ctx.shadowBlur = 16;
+        ctx.beginPath();
+        ctx.ellipse(0, haloY, 17, 5, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Upper second tier halo
+        ctx.strokeStyle = 'rgba(255, 215, 0, 0.7)';
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.ellipse(0, haloY - 4, 12, 3.5, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // 5-Pointed divine starlight crown
+        ctx.fillStyle = '#FFD700';
+        for (let pt = -2; pt <= 2; pt++) {
+          const px = pt * 5;
+          const py = haloY - (pt === 0 ? 10 : Math.abs(pt) === 1 ? 7 : 5);
+          ctx.beginPath();
+          ctx.moveTo(px - 1.8, haloY - 4);
+          ctx.lineTo(px, py);
+          ctx.lineTo(px + 1.8, haloY - 4);
+          ctx.fill();
+        }
+
+        // Central celestial cyan diamond jewel
+        ctx.fillStyle = '#00F0FF';
+        ctx.shadowColor = '#00F0FF';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(0, haloY - 4, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.restore();
     }
 
@@ -1484,55 +1637,192 @@ export function FlappyGame({
     ctx.arc(0, 0, BIRD_RADIUS - 6, Math.PI * 0.2, Math.PI * 1.2);
     ctx.stroke();
 
-    // Craft-Specific Wing Rendering
+    // Craft-Specific Celestial Goddess Wing Rendering
     const wingFlap = Math.sin(wingCycle * 2.5) * 9 * craft.wingSpanFactor;
     ctx.save();
     ctx.translate(-8, wingFlap);
-    ctx.fillStyle = '#1E293B';
-    ctx.strokeStyle = mainColor;
-    ctx.lineWidth = 2;
 
     if (craft.id === 'phoenix') {
-      // Swept fiery feathered wing
+      // Sol-Ignis: Swept blazing multi-feathered solar flame wing
       ctx.beginPath();
-      ctx.moveTo(-12, -4);
-      ctx.lineTo(14, -12);
-      ctx.lineTo(18, 2);
-      ctx.lineTo(8, 8);
+      ctx.moveTo(-14, -6);
+      ctx.lineTo(16, -15);
+      ctx.lineTo(24, -4);
+      ctx.lineTo(18, 4);
+      ctx.lineTo(8, 9);
       ctx.closePath();
+      const fireGrad = ctx.createLinearGradient(-14, -15, 24, 9);
+      fireGrad.addColorStop(0, '#FFAA00');
+      fireGrad.addColorStop(0.5, '#FF4500');
+      fireGrad.addColorStop(1, '#990022');
+      ctx.fillStyle = fireGrad;
+      ctx.strokeStyle = '#FFAA00';
+      ctx.shadowColor = '#FF4500';
+      ctx.shadowBlur = 12;
+      ctx.lineWidth = 1.8;
       ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Fiery quill vein
+      ctx.strokeStyle = '#FFF3BF';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(-10, -2);
+      ctx.lineTo(16, -6);
       ctx.stroke();
     } else if (craft.id === 'raven') {
-      // Angular stealth faceted wing
+      // Morrigan: Obsidian layered celestial feathers with glowing violet starlight veins
       ctx.beginPath();
-      ctx.moveTo(-14, -2);
-      ctx.lineTo(12, -10);
-      ctx.lineTo(6, 6);
-      ctx.lineTo(-8, 8);
+      ctx.moveTo(-15, -4);
+      ctx.lineTo(14, -12);
+      ctx.lineTo(19, 0);
+      ctx.lineTo(10, 8);
+      ctx.lineTo(-6, 9);
       ctx.closePath();
+      const ravenGrad = ctx.createLinearGradient(-15, -12, 19, 9);
+      ravenGrad.addColorStop(0, '#2E1065');
+      ravenGrad.addColorStop(0.6, '#0F0E1A');
+      ravenGrad.addColorStop(1, '#020617');
+      ctx.fillStyle = ravenGrad;
+      ctx.strokeStyle = '#C084FC';
+      ctx.shadowColor = '#A855F7';
+      ctx.shadowBlur = 10;
+      ctx.lineWidth = 1.8;
       ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Ultraviolet quill vein
+      ctx.strokeStyle = '#E879F9';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(-11, -2);
+      ctx.lineTo(14, -4);
       ctx.stroke();
     } else if (craft.id === 'hummingbird') {
-      // High frequency kinetic blade
-      ctx.globalAlpha = 0.8;
+      // Flora-Zephyr: High-frequency crystalline kinetic wings shimmering with emerald glow
+      ctx.globalAlpha = 0.85;
       ctx.beginPath();
-      ctx.moveTo(-6, -2);
-      ctx.lineTo(16, -6);
-      ctx.lineTo(10, 4);
+      ctx.moveTo(-8, -4);
+      ctx.lineTo(18, -9);
+      ctx.lineTo(14, 5);
+      ctx.lineTo(2, 7);
       ctx.closePath();
+      const floraGrad = ctx.createLinearGradient(-8, -9, 18, 7);
+      floraGrad.addColorStop(0, '#A7F3D0');
+      floraGrad.addColorStop(0.5, '#10B981');
+      floraGrad.addColorStop(1, '#064E3B');
+      ctx.fillStyle = floraGrad;
+      ctx.strokeStyle = '#34D399';
+      ctx.shadowColor = '#10B981';
+      ctx.shadowBlur = 10;
+      ctx.lineWidth = 1.6;
       ctx.fill();
       ctx.stroke();
-    } else if (craft.id === 'osprey') {
-      // Heavy turbine nacelle wing
+      ctx.shadowBlur = 0;
+
+      // Emerald light veins
+      ctx.strokeStyle = '#ECFDF5';
+      ctx.lineWidth = 1.2;
       ctx.beginPath();
-      ctx.rect(-10, -8, 22, 14);
+      ctx.moveTo(-4, -1);
+      ctx.lineTo(13, -3);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else if (craft.id === 'osprey') {
+      // Athena-Aegis: Golden eagle aegis wing with divine protection runes
+      ctx.beginPath();
+      ctx.moveTo(-14, -6);
+      ctx.lineTo(16, -11);
+      ctx.lineTo(20, 2);
+      ctx.lineTo(12, 9);
+      ctx.lineTo(-4, 9);
+      ctx.closePath();
+      const aegisGrad = ctx.createLinearGradient(-14, -11, 20, 9);
+      aegisGrad.addColorStop(0, '#FEF08A');
+      aegisGrad.addColorStop(0.4, '#F59E0B');
+      aegisGrad.addColorStop(1, '#451A03');
+      ctx.fillStyle = aegisGrad;
+      ctx.strokeStyle = '#FDE047';
+      ctx.shadowColor = '#F59E0B';
+      ctx.shadowBlur = 12;
+      ctx.lineWidth = 2;
       ctx.fill();
       ctx.stroke();
-      // Hazard accent
-      ctx.fillStyle = craft.accentColor;
-      ctx.fillRect(-6, -6, 4, 10);
-    } else if (craft.id === 'goddess') {
-      // Celestial Golden Feathered Wings with Astral Glow
+      ctx.shadowBlur = 0;
+
+      // Divine lightning glyph
+      ctx.strokeStyle = '#FEF08A';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-8, -2);
+      ctx.lineTo(4, -5);
+      ctx.lineTo(8, -1);
+      ctx.lineTo(15, -4);
+      ctx.stroke();
+    } else if (craft.id === 'specter') {
+      // Selene-Phase: Prismatic translucent crystal fairy-phase wing
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(-12, -5);
+      ctx.lineTo(17, -13);
+      ctx.lineTo(22, -1);
+      ctx.lineTo(13, 7);
+      ctx.lineTo(-4, 8);
+      ctx.closePath();
+      const specGrad = ctx.createLinearGradient(-12, -13, 22, 8);
+      specGrad.addColorStop(0, 'rgba(34, 211, 238, 0.9)');
+      specGrad.addColorStop(0.5, 'rgba(232, 121, 249, 0.8)');
+      specGrad.addColorStop(1, 'rgba(52, 211, 153, 0.85)');
+      ctx.fillStyle = specGrad;
+      ctx.strokeStyle = '#67E8F9';
+      ctx.shadowColor = '#00FFA3';
+      ctx.shadowBlur = 12;
+      ctx.lineWidth = 1.8;
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Astral starlight quill
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.moveTo(-8, -2);
+      ctx.lineTo(16, -4);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else if (craft.id === 'falcon') {
+      // Valyria: Supersonic cyan feather-blade with luminous aeolian quills
+      ctx.beginPath();
+      ctx.moveTo(-13, -5);
+      ctx.lineTo(15, -12);
+      ctx.lineTo(19, 1);
+      ctx.lineTo(10, 8);
+      ctx.lineTo(-5, 8);
+      ctx.closePath();
+      const valyriaGrad = ctx.createLinearGradient(-13, -12, 19, 8);
+      valyriaGrad.addColorStop(0, '#BAE6FD');
+      valyriaGrad.addColorStop(0.5, '#0284C7');
+      valyriaGrad.addColorStop(1, '#082F49');
+      ctx.fillStyle = valyriaGrad;
+      ctx.strokeStyle = '#38BDF8';
+      ctx.shadowColor = '#00F0FF';
+      ctx.shadowBlur = 12;
+      ctx.lineWidth = 1.8;
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Azure wind quill
+      ctx.strokeStyle = '#E0F2FE';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(-9, -2);
+      ctx.lineTo(15, -4);
+      ctx.stroke();
+    } else {
+      // Aethelia: Celestial Golden Feathered Wings with Astral Glow
       ctx.beginPath();
       ctx.moveTo(-14, -6);
       ctx.lineTo(16, -14);
@@ -1547,33 +1837,35 @@ export function FlappyGame({
       ctx.fillStyle = wingGrad;
       ctx.strokeStyle = '#FFE066';
       ctx.shadowColor = '#FFD700';
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = 12;
+      ctx.lineWidth = 2;
       ctx.fill();
       ctx.stroke();
       ctx.shadowBlur = 0;
 
       // Starlight cyan quill vein
       ctx.strokeStyle = '#00F0FF';
-      ctx.lineWidth = 1.2;
+      ctx.lineWidth = 1.4;
       ctx.beginPath();
       ctx.moveTo(-10, -2);
       ctx.lineTo(18, -4);
       ctx.stroke();
-    } else {
-      // Falcon / Specter standard interceptor wing
-      ctx.beginPath();
-      ctx.moveTo(-10, -4);
-      ctx.lineTo(8, -8);
-      ctx.lineTo(12, 4);
-      ctx.lineTo(-6, 8);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
     }
     ctx.restore();
 
-    // Visor Cockpit
+    // Visor / Celestial Eyes & Forehead Divine Diadem
     if (alive) {
+      // Forehead Divine Bindi / Diadem Jewel
+      ctx.save();
+      ctx.fillStyle = craft.accentColor;
+      ctx.shadowColor = craft.accentColor;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(8, -11, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // Celestial Visor / Eyes
       ctx.shadowColor = craft.visorColor;
       ctx.shadowBlur = 10;
       ctx.fillStyle = craft.visorColor;
@@ -1582,7 +1874,7 @@ export function FlappyGame({
       ctx.fill();
       ctx.shadowBlur = 0;
 
-      // Glint
+      // Celestial Starlight Glint
       ctx.fillStyle = '#FFFFFF';
       ctx.beginPath();
       ctx.ellipse(14, -6, 4.5, 2, -0.1, 0, Math.PI * 2);
@@ -2553,8 +2845,8 @@ export function FlappyGame({
                       : 'HULL INTEGRITY 0% // CRITICAL IMPACT'}
                   </span>
                 </div>
-                <span className="text-[10px] text-slate-400">
-                  CHASSIS: {activeCraft.name.split(' ')[0].toUpperCase()}
+                <span className="text-[10px] text-slate-400 font-mono">
+                  GODDESS: {activeCraft.name.split('//')[0].trim().toUpperCase()}
                 </span>
               </div>
 

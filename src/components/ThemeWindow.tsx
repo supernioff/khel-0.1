@@ -10,6 +10,8 @@ import {
   Radio,
   Zap,
   Plane,
+  Crown,
+  Sparkles,
 } from 'lucide-react';
 import type { CyberThemeId, BirdCraftId } from '../types/game';
 import { CYBER_THEMES, BIRD_CRAFTS } from '../lib/themes';
@@ -24,6 +26,161 @@ interface Props {
   onSelectCraft: (craft: BirdCraftId) => void;
   currentMode?: 'single' | 'multiplayer';
   onSelectMode?: (mode: 'single' | 'multiplayer') => void;
+}
+
+function GoddessAvatarThumbnail({ craftKey }: { craftKey: BirdCraftId }) {
+  const c = BIRD_CRAFTS[craftKey];
+  return (
+    <div
+      className="h-14 w-full rounded-lg border border-white/10 mb-2 relative overflow-hidden flex items-center justify-center"
+      style={{
+        background: `radial-gradient(circle at 50% 45%, ${c.accentColor}25, ${c.hullColor} 75%, #020617 100%)`,
+      }}
+    >
+      {/* Floating Celestial Halo */}
+      <div
+        className="absolute top-1.5 w-10 h-4 rounded-full border-2 animate-pulse"
+        style={{
+          borderColor: c.accentColor,
+          boxShadow: `0 0 12px ${c.accentColor}`,
+        }}
+      />
+
+      {/* Floating Crown / Diadem Jewel */}
+      <div
+        className="absolute top-1 w-2 h-2 rotate-45"
+        style={{
+          backgroundColor: c.visorColor,
+          boxShadow: `0 0 8px ${c.visorColor}`,
+        }}
+      />
+
+      {/* Goddess Avatar Body Silhouette */}
+      <div className="relative mt-2.5 flex items-center justify-center">
+        {/* Left Wing */}
+        <div
+          className="w-5 h-3 rounded-tl-full rounded-bl-lg -rotate-12 border-t-2"
+          style={{
+            backgroundColor: `${c.accentColor}40`,
+            borderColor: c.accentColor,
+          }}
+        />
+        {/* Divine Core */}
+        <div
+          className="w-4 h-5 rounded-full border shadow-md mx-0.5 relative z-10"
+          style={{
+            backgroundColor: c.hullColor,
+            borderColor: c.accentColor,
+            boxShadow: `0 0 8px ${c.accentColor}`,
+          }}
+        >
+          {/* Third Eye / Visor glint */}
+          <div
+            className="w-1.5 h-1.5 rounded-full mx-auto mt-1"
+            style={{ backgroundColor: c.visorColor }}
+          />
+        </div>
+        {/* Right Wing */}
+        <div
+          className="w-5 h-3 rounded-tr-full rounded-br-lg rotate-12 border-t-2"
+          style={{
+            backgroundColor: `${c.accentColor}40`,
+            borderColor: c.accentColor,
+          }}
+        />
+      </div>
+
+      {/* Celestial Energy Stream Base */}
+      <div
+        className="absolute bottom-0 left-0 right-0 h-1"
+        style={{
+          backgroundColor: c.thrusterColor,
+          boxShadow: `0 0 8px ${c.thrusterColor}`,
+        }}
+      />
+    </div>
+  );
+}
+
+function ThemeThumbnail({ themeKey }: { themeKey: CyberThemeId }) {
+  const t = CYBER_THEMES[themeKey];
+  return (
+    <div
+      className="h-12 w-full rounded-lg border border-white/10 mb-2 relative overflow-hidden flex items-end justify-center"
+      style={{
+        background: `linear-gradient(180deg, ${t.skyTop}, ${t.skyBottom})`,
+      }}
+    >
+      {themeKey === 'synthwave' && (
+        <>
+          <div className="absolute top-1.5 w-7 h-7 rounded-full bg-gradient-to-b from-amber-300 via-rose-500 to-purple-600 shadow-[0_0_10px_#f43f5e]" />
+          <div className="absolute top-4 w-7 h-0.5 bg-purple-950/80" />
+          <div className="absolute top-5 w-7 h-0.5 bg-purple-950/80" />
+          <div className="w-full h-3 border-t border-rose-500 bg-purple-950/60 flex items-end justify-center">
+            <span className="text-[7px] text-pink-400 font-mono">▲▲▲</span>
+          </div>
+        </>
+      )}
+      {themeKey === 'matrix' && (
+        <div className="absolute inset-0 flex justify-around items-center px-1 font-mono text-[8px] text-emerald-400/90 font-bold tracking-widest select-none">
+          <span className="animate-pulse">1 0</span>
+          <span className="opacity-90">0 1</span>
+          <span className="opacity-70">1 0</span>
+        </div>
+      )}
+      {themeKey === 'cyberpunk' && (
+        <div className="w-full h-full flex items-end justify-around px-1 pb-1">
+          <div className="w-2.5 h-6 bg-slate-900 border-t border-cyan-400" />
+          <div className="w-3.5 h-8 bg-slate-900 border-t-2 border-rose-500 shadow-[0_0_6px_#f43f5e]" />
+          <div className="w-2.5 h-5 bg-slate-900 border-t border-cyan-400" />
+        </div>
+      )}
+      {themeKey === 'void' && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="w-6 h-6 rounded-full bg-black border-2 border-indigo-400 shadow-[0_0_12px_#818cf8] relative">
+            <div className="absolute -inset-1 border border-indigo-300/60 rounded-full rotate-45" />
+          </div>
+        </div>
+      )}
+      {themeKey === 'solar' && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="w-7 h-7 rounded-full bg-gradient-to-r from-amber-300 to-orange-600 shadow-[0_0_15px_#f97316] relative">
+            <div className="absolute -top-1 -right-1 w-3 h-3 border-t-2 border-amber-300 rounded-full animate-ping opacity-60" />
+          </div>
+        </div>
+      )}
+      {themeKey === 'aurora' && (
+        <div className="absolute inset-0 flex flex-col justify-center px-2">
+          <div className="h-1.5 w-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-purple-500 rounded-full blur-[1px] opacity-80" />
+          <div className="h-1 w-3/4 mx-auto bg-gradient-to-r from-teal-300 to-indigo-400 rounded-full blur-[1px] mt-1 opacity-70" />
+        </div>
+      )}
+      {themeKey === 'citadel' && (
+        <div className="w-full h-full flex items-end justify-center pb-1 gap-1">
+          <div className="w-2 h-5 bg-amber-950 border-t border-amber-400" />
+          <div className="w-3 h-8 bg-amber-950 border-t-2 border-amber-300 shadow-[0_0_8px_#f59e0b] relative">
+            <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-4 h-1 border border-amber-200 rounded-full" />
+          </div>
+          <div className="w-2 h-6 bg-amber-950 border-t border-amber-400" />
+        </div>
+      )}
+      {themeKey === 'acid' && (
+        <div className="w-full h-full flex items-end justify-center px-2 pb-1 gap-1">
+          <div className="w-1.5 h-3 bg-lime-400" />
+          <div className="w-1.5 h-6 bg-cyan-400" />
+          <div className="w-1.5 h-8 bg-pink-500 shadow-[0_0_6px_#ff007f]" />
+          <div className="w-1.5 h-5 bg-lime-400" />
+          <div className="w-1.5 h-7 bg-cyan-400" />
+        </div>
+      )}
+
+      {/* Horizon Gate Strip */}
+      <div
+        className="absolute bottom-0 left-0 right-0 h-1"
+        style={{ backgroundColor: t.gatePrimary, boxShadow: `0 0 6px ${t.gateGlow}` }}
+      />
+    </div>
+  );
 }
 
 export function ThemeWindow({
@@ -101,14 +258,14 @@ export function ThemeWindow({
 
         {/* Scrollable Configuration Sections */}
         <div className="p-5 overflow-y-auto space-y-6 text-sm">
-          {/* Section 1: Bird Craft Fleet */}
+          {/* Section 1: Celestial Goddess Avatars */}
           <div>
             <div className="flex items-center justify-between mb-2.5">
               <span className="text-xs font-black tracking-widest text-cyan-400 uppercase font-mono flex items-center gap-1.5">
-                <Plane className="w-4 h-4" /> 01 // SELECT BIRD CRAFT
+                <Crown className="w-4 h-4 text-amber-400" /> 01 // SELECT CELESTIAL GODDESS AVATAR
               </span>
               <span className="text-[11px] font-mono text-slate-400">
-                Aerospace chassis specifications
+                Divine incarnations & sacred aerodynamic halos
               </span>
             </div>
 
@@ -126,13 +283,15 @@ export function ThemeWindow({
                     }}
                     className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
                       isSelected
-                        ? 'bg-cyan-950/40 border-cyan-400 shadow-[0_0_15px_rgba(0,240,255,0.25)]'
+                        ? 'bg-cyan-950/40 border-cyan-400 shadow-[0_0_18px_rgba(0,240,255,0.3)]'
                         : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                    <GoddessAvatarThumbnail craftKey={craftKey} />
+
+                    <div className="flex items-start justify-between gap-2 mb-1">
                       <div>
-                        <span className="text-[10px] font-mono text-slate-400 block">
+                        <span className="text-[10px] font-mono text-cyan-400 font-bold block">
                           {c.designation}
                         </span>
                         <h4 className="font-bold text-white text-xs sm:text-sm">
@@ -153,11 +312,14 @@ export function ThemeWindow({
                     </p>
 
                     <div className="flex items-center justify-between pt-1 border-t border-slate-800 text-[10px] font-mono">
-                      <span className="text-slate-400">{c.classType}</span>
+                      <span className="text-slate-400 truncate max-w-[140px]">{c.classType}</span>
                       {isSelected ? (
-                        <span className="text-cyan-400 font-bold">ARMED</span>
+                        <span className="text-amber-300 font-bold flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-amber-400" />
+                          BLESSED
+                        </span>
                       ) : (
-                        <span className="text-slate-400">SELECT</span>
+                        <span className="text-slate-400 hover:text-white">INVOKE</span>
                       )}
                     </div>
                   </button>
@@ -195,17 +357,7 @@ export function ThemeWindow({
                         : 'bg-slate-900/40 border-slate-800 hover:border-slate-700 hover:bg-slate-900/70'
                     }`}
                   >
-                    <div
-                      className="h-10 w-full rounded-lg border border-white/10 mb-2 relative overflow-hidden"
-                      style={{
-                        background: `linear-gradient(135deg, ${t.skyTop}, ${t.skyBottom})`,
-                      }}
-                    >
-                      <div
-                        className="absolute bottom-0 left-0 right-0 h-1.5"
-                        style={{ backgroundColor: t.gatePrimary }}
-                      />
-                    </div>
+                    <ThemeThumbnail themeKey={themeKey} />
 
                     <div className="min-w-0">
                       <div className="flex items-center justify-between">
