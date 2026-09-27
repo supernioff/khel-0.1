@@ -1,0 +1,31 @@
+{
+  "entities": {
+    "User": {
+      "collection": "users",
+      "fields": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "displayName": { "type": "string", "description": "Player display name" },
+        "email": { "type": "string", "description": "Player email" },
+        "photoURL": { "type": "string", "description": "Player avatar URL" },
+        "highScore": { "type": "number", "description": "Highest single player score" },
+        "multiplayerWins": { "type": "number", "description": "Total multiplayer race wins" },
+        "gamesPlayed": { "type": "number", "description": "Total games played" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last update" }
+      }
+    },
+    "Room": {
+      "collection": "rooms",
+      "fields": {
+        "id": { "type": "string", "description": "Unique room ID" },
+        "code": { "type": "string", "description": "Human readable 6-character room code" },
+        "status": { "type": "string", "description": "waiting | countdown | racing | finished" },
+        "host": { "type": "map", "description": "Host player status and score" },
+        "guest": { "type": "map", "description": "Guest player status and score" },
+        "pipeSeed": { "type": "number", "description": "Random seed so both players get identical pipe obstacles" },
+        "winner": { "type": "string", "description": "UID of winner or tie" },
+        "countdownStart": { "type": "number", "description": "Timestamp when 3-2-1 countdown begins" },
+        "createdAt": { "type": "number", "description": "Creation timestamp" }
+      }
+    }
+  }
+}

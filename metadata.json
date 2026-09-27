@@ -1,0 +1,6 @@
+{
+  "name": "Flappy Bird Multiplayer",
+  "description": "A mobile-friendly Flappy Bird game with Google Login, Endless Single Player, and Real-time Online Multiplayer race mode with shared room codes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

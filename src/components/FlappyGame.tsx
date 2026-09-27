@@ -1,0 +1,2707 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import confetti from 'canvas-confetti';
+import {
+  Trophy,
+  RotateCcw,
+  Sparkles,
+  Maximize2,
+  Minimize2,
+  Palette,
+  Volume2,
+  VolumeX,
+  Music,
+  Zap,
+  Radio,
+  Plane,
+  ShieldAlert,
+  Sliders,
+  LogIn,
+  ShieldCheck,
+  CheckCircle2,
+  Film,
+  Crown,
+  Gamepad2,
+  Users,
+} from 'lucide-react';
+import { soundManager } from '../lib/audio';
+import {
+  updateUserScore,
+  syncPlayerRaceState,
+  incrementUserWins,
+  finishRace,
+  restartRoomMatch,
+  beginRacing,
+} from '../lib/gameService';
+import type {
+  UserProfile,
+  MultiplayerRoom,
+  PipePair,
+  Particle,
+  FloatingText,
+  CyberThemeId,
+  BirdCraftId,
+} from '../types/game';
+import {
+  CYBER_THEMES,
+  BIRD_CRAFTS,
+  getBirdCraft,
+  getSectorStage,
+  type SectorColorStage,
+} from '../lib/themes';
+import type { User } from 'firebase/auth';
+
+interface Props {
+  userProfile: UserProfile;
+  onUpdateProfile: (updated: Partial<UserProfile>) => void;
+  activeRoom?: MultiplayerRoom | null;
+  onExitRoom?: () => void;
+  onOpenLeaderboard?: () => void;
+  themeId?: CyberThemeId;
+  onSelectTheme?: (theme: CyberThemeId) => void;
+  craftId?: BirdCraftId;
+  onSelectCraft?: (craft: BirdCraftId) => void;
+  onOpenThemeWindow?: () => void;
+  currentUser?: User | null;
+  onOpenAuthModal?: () => void;
+  onLoginGoogle?: () => Promise<boolean>;
+  isModalOpen?: boolean;
+  onOpenCinematic?: () => void;
+  isGuestDismissed?: boolean;
+  onDismissGuestClearance?: () => void;
+  currentMode?: 'single' | 'multiplayer';
+  onSelectMode?: (mode: 'single' | 'multiplayer') => void;
+}
+
+// Game Physics Constants (Full-Screen Virtual Space)
+const GAME_HEIGHT = 650;
+const BIRD_X = 140;
+const BIRD_RADIUS = 26;
+const BIRD_HIT_RADIUS = 20;
+const GRAVITY = 0.24;
+const JUMP_IMPULSE = -6.2;
+const MAX_FALL_SPEED = 5.6;
+const BASE_PIPE_SPEED = 2.4;
+const PIPE_WIDTH = 90;
+const PIPE_GAP = 185;
+const BASE_PIPE_SPACING = 380;
+const GROUND_HEIGHT = 90;
+const PLAYABLE_HEIGHT = GAME_HEIGHT - GROUND_HEIGHT;
+
+export function FlappyGame({
+  userProfile,
+  onUpdateProfile,
+  activeRoom,
+  onExitRoom,
+  onOpenLeaderboard,
+  themeId = 'cyberpunk',
+  onSelectTheme,
+  craftId = 'falcon',
+  onSelectCraft,
+  onOpenThemeWindow,
+  currentUser,
+  onOpenAuthModal,
+  onLoginGoogle,
+  isModalOpen = false,
+  onOpenCinematic,
+  isGuestDismissed = false,
+  onDismissGuestClearance,
+  currentMode = 'single',
+  onSelectMode,
+}: Props) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const virtualWidthRef = useRef<number>(960);
+  const virtualHeightRef = useRef<number>(GAME_HEIGHT);
+  const virtualOffsetYRef = useRef<number>(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [sfxMuted, setSfxMuted] = useState(soundManager.isMuted());
+  const [musicMuted, setMusicMuted] = useState(soundManager.isMusicMuted());
+  const [voiceEnabled, setVoiceEnabled] = useState(soundManager.isVoiceEnabled());
+
+  const isGoogleUser = Boolean(currentUser && !currentUser.isAnonymous);
+  const guestBypassedAuthRef = useRef(isGuestDismissed);
+  const [guestBypassedState, setGuestBypassedState] = useState(isGuestDismissed);
+
+  // Sync isGuestDismissed prop
+  useEffect(() => {
+    if (isGuestDismissed) {
+      guestBypassedAuthRef.current = true;
+      setGuestBypassedState(true);
+    }
+  }, [isGuestDismissed]);
+
+  const isMultiplayer = !!activeRoom;
+  const isHost = activeRoom?.host.uid === userProfile.uid;
+
+  // Selected Craft
+  const activeCraft = getBirdCraft(craftId);
+
+  // Game States
+  const [gameState, setGameState] = useState<
+    'idle' | 'countdown' | 'playing' | 'gameover'
+  >('idle');
+  const [score, setScore] = useState(0);
+  const [distance, setDistance] = useState(0);
+  const [warpSpeed, setWarpSpeed] = useState('1.0x');
+  const [highScore, setHighScore] = useState(userProfile.highScore || 0);
+  const [isNewRecord, setIsNewRecord] = useState(false);
+  const [countdownNum, setCountdownNum] = useState(3);
+  const [raceWinner, setRaceWinner] = useState<string | 'tie' | null>(null);
+  const [rematchLoading, setRematchLoading] = useState(false);
+
+  // Dynamic 10-Point Color Stage Evolution
+  const currentSector = getSectorStage(score);
+  const baseTheme = CYBER_THEMES[themeId] || CYBER_THEMES.cyberpunk;
+  const activeTheme: SectorColorStage =
+    score >= 10
+      ? currentSector
+      : {
+          scoreThreshold: 0,
+          sectorName: baseTheme.name.toUpperCase(),
+          headline: 'READY FOR TAKEOFF!',
+          subtitle: 'Sector 1 // Warp Thrusters Active',
+          gatePrimary: baseTheme.gatePrimary,
+          gateSecondary: baseTheme.gateSecondary,
+          gateGlow: baseTheme.gateGlow,
+          gridColor: baseTheme.gridColor,
+          skyTop: baseTheme.skyTop,
+          skyBottom: baseTheme.skyBottom,
+          birdVisor: baseTheme.birdVisor,
+          accent: baseTheme.accent,
+        };
+
+  const activeThemeRef = useRef<SectorColorStage>(activeTheme);
+  activeThemeRef.current = activeTheme;
+
+  // Top Milestone Banner
+  const [milestoneBanner, setMilestoneBanner] = useState<{
+    headline: string;
+    subtitle: string;
+    color: string;
+  } | null>(null);
+  const milestoneTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Sync high score from user profile
+  useEffect(() => {
+    if (userProfile.highScore > highScore) {
+      setHighScore(userProfile.highScore);
+    }
+  }, [userProfile.highScore, highScore]);
+
+  // Opponent race info
+  const opponent = isMultiplayer
+    ? isHost
+      ? activeRoom?.guest
+      : activeRoom?.host
+    : null;
+
+  // Physics loop state refs
+  const birdY = useRef(260);
+  const birdVy = useRef(0);
+  const birdRotation = useRef(0);
+  const flapFrame = useRef(0);
+  const isAlive = useRef(true);
+  const currentScore = useRef(0);
+  const currentDistance = useRef(0);
+  const gameStartTime = useRef(0);
+  const currentSpeedMultiplier = useRef(1);
+  const pipes = useRef<PipePair[]>([]);
+  const particles = useRef<Particle[]>([]);
+  const floaters = useRef<FloatingText[]>([]);
+  const groundOffset = useRef(0);
+  const bgCityOffset = useRef(0);
+  const animFrameId = useRef<number | null>(null);
+  const lastSyncTime = useRef(0);
+  const lastOpponentY = useRef(260);
+  const targetOpponentY = useRef(260);
+  const prngRef = useRef<() => number>(Math.random);
+  const screenShakeRef = useRef(0);
+  const pipeSpawnCountRef = useRef(0);
+  const opponentCrashedRef = useRef(false);
+
+  // Entry Guardian Creature Ref (Aero-Chrome Launch Sentinel)
+  const guardianRef = useRef<{
+    x: number;
+    y: number;
+    vx: number;
+    mode: 'idle' | 'launching' | 'cleared';
+    wingPhase: number;
+    time: number;
+  }>({
+    x: BIRD_X + 115,
+    y: 195,
+    vx: 0,
+    mode: 'idle',
+    wingPhase: 0,
+    time: 0,
+  });
+
+  // Crash Steel Reaper Creature Ref (Chrome Sentinel Reaper)
+  const reaperRef = useRef<{
+    active: boolean;
+    x: number;
+    y: number;
+    targetX: number;
+    targetY: number;
+    wingPhase: number;
+    scanPhase: number;
+    time: number;
+    arrived: boolean;
+  }>({
+    active: false,
+    x: 999,
+    y: 999,
+    targetX: 0,
+    targetY: 0,
+    wingPhase: 0,
+    scanPhase: 0,
+    time: 0,
+    arrived: false,
+  });
+
+  // Confetti trigger
+  const triggerConfetti = useCallback(() => {
+    try {
+      confetti({
+        particleCount: 50,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: [
+          activeTheme.gatePrimary,
+          activeTheme.accent,
+          '#00F0FF',
+          '#FF007F',
+          '#FBBF24',
+        ],
+      });
+    } catch {
+      // ignore
+    }
+  }, [activeTheme.gatePrimary, activeTheme.accent]);
+
+  // Reset Game State
+  const initGame = useCallback(() => {
+    birdY.current = 260;
+    birdVy.current = 0;
+    birdRotation.current = 0;
+    flapFrame.current = 0;
+    isAlive.current = true;
+    currentScore.current = 0;
+    currentDistance.current = 0;
+    currentSpeedMultiplier.current = 1;
+    pipeSpawnCountRef.current = 0;
+    opponentCrashedRef.current = false;
+    pipes.current = [];
+    particles.current = [];
+    floaters.current = [];
+    screenShakeRef.current = 0;
+
+    // Reset unique creatures
+    guardianRef.current = {
+      x: BIRD_X + 115,
+      y: 195,
+      vx: 0,
+      mode: 'idle',
+      wingPhase: 0,
+      time: 0,
+    };
+    reaperRef.current = {
+      active: false,
+      x: 999,
+      y: 999,
+      targetX: 0,
+      targetY: 0,
+      wingPhase: 0,
+      scanPhase: 0,
+      time: 0,
+      arrived: false,
+    };
+
+    setScore(0);
+    setDistance(0);
+    setWarpSpeed('1.0x');
+    setIsNewRecord(false);
+    setRaceWinner(null);
+  }, []);
+
+  // Fullscreen Handler
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen?.();
+    } else {
+      document.exitFullscreen?.();
+    }
+  };
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
+
+  // Toggle SFX
+  const handleToggleSfx = () => {
+    const next = soundManager.toggleMute();
+    setSfxMuted(next);
+  };
+
+  // Toggle Music
+  const handleToggleMusic = () => {
+    const next = soundManager.toggleMusic();
+    setMusicMuted(next);
+  };
+
+  // Toggle Voice
+  const handleToggleVoice = () => {
+    const next = soundManager.toggleVoice();
+    setVoiceEnabled(next);
+  };
+
+  // Flap wings / Jet Impulse
+  const handleFlap = useCallback(() => {
+    // Prevent starting or flapping when modal (crafts/themes, welcome, leaderboard) is open
+    if (isModalOpen) return;
+
+    if (gameState === 'idle') {
+      if (!isMultiplayer) {
+        // Only ask if user has NOT chosen guest mode and hasn't logged in with Google
+        if (
+          !isGoogleUser &&
+          !isGuestDismissed &&
+          !guestBypassedAuthRef.current &&
+          !guestBypassedState &&
+          onOpenAuthModal
+        ) {
+          onOpenAuthModal();
+          return;
+        }
+
+        setGameState('playing');
+        gameStartTime.current = performance.now();
+        birdVy.current = JUMP_IMPULSE;
+        soundManager.playFlap(craftId);
+        soundManager.startMusic('intense');
+        soundManager.speakTacticalAlert('THRUSTERS ENGAGED.');
+
+        // Engage Entry Guardian launch escort
+        guardianRef.current.mode = 'launching';
+        soundManager.playGuardianDeploy();
+      }
+      return;
+    }
+
+    if (gameState === 'playing' && isAlive.current) {
+      birdVy.current = JUMP_IMPULSE;
+      soundManager.playFlap(craftId);
+
+      // Jet exhaust particles with craft thruster color
+      const effSpeed = BASE_PIPE_SPEED * currentSpeedMultiplier.current;
+      for (let i = 0; i < 6; i++) {
+        particles.current.push({
+          x: BIRD_X - 22,
+          y: birdY.current + (Math.random() * 8 - 4),
+          vx: -effSpeed * 2.2 - Math.random() * 2.5,
+          vy: (Math.random() - 0.5) * 2.5,
+          color:
+            Math.random() > 0.4
+              ? activeCraft.thrusterColor
+              : activeTheme.gatePrimary,
+          radius: Math.random() * 3.5 + 1.5,
+          alpha: 0.9,
+          decay: 0.05,
+        });
+      }
+
+      // Instantaneous telemetry sync on flap
+      if (isMultiplayer && activeRoom) {
+        syncPlayerRaceState(activeRoom.id, isHost, {
+          y: birdY.current,
+          vy: birdVy.current,
+          score: currentScore.current,
+          distance: currentDistance.current,
+          alive: true,
+        });
+      }
+    } else if (gameState === 'gameover') {
+      // Direct instant restart via click or spacebar
+      handleRestart();
+    }
+  }, [
+    gameState,
+    isMultiplayer,
+    craftId,
+    activeCraft.thrusterColor,
+    activeTheme.gatePrimary,
+    isGoogleUser,
+    isGuestDismissed,
+    guestBypassedState,
+    onOpenAuthModal,
+    isModalOpen,
+    activeRoom,
+    isHost,
+  ]);
+
+  // High-Tech Crash & Impact Handling
+  const handleCrash = useCallback(() => {
+    if (!isAlive.current) return;
+    isAlive.current = false;
+
+    // Cinematic Audio & Speech cues
+    soundManager.playHit();
+    setTimeout(() => soundManager.playDie(), 90);
+    soundManager.setMusicIntensity('crash');
+    soundManager.speakTacticalAlert('CRITICAL IMPACT DETECTED. HULL BREACH.');
+
+    // Screen Shake Impulse
+    screenShakeRef.current = 14;
+
+    // Deploy Crash Steel Reaper Creature
+    reaperRef.current = {
+      active: true,
+      x: virtualWidthRef.current + 80,
+      y: Math.max(50, birdY.current - 120),
+      targetX: BIRD_X + 45,
+      targetY: Math.max(65, birdY.current - 75),
+      wingPhase: 0,
+      scanPhase: 0,
+      time: 0,
+      arrived: false,
+    };
+    setTimeout(() => {
+      soundManager.playReaperArrive();
+    }, 260);
+
+    // High-Tech Kinetic Shrapnel & EMP Sparks (No cartoon dead emojis!)
+    for (let i = 0; i < 32; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = Math.random() * 7 + 2.5;
+      particles.current.push({
+        x: BIRD_X,
+        y: birdY.current,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        color: [
+          activeCraft.thrusterColor,
+          activeTheme.gatePrimary,
+          '#EF4444',
+          '#FFFFFF',
+        ][Math.floor(Math.random() * 4)],
+        radius: Math.random() * 4 + 2,
+        alpha: 1,
+        decay: 0.035,
+      });
+    }
+
+    // Trailing dark ion smoke puffs
+    for (let i = 0; i < 8; i++) {
+      particles.current.push({
+        x: BIRD_X + (Math.random() * 20 - 10),
+        y: birdY.current + (Math.random() * 20 - 10),
+        vx: (Math.random() - 0.5) * 2,
+        vy: -Math.random() * 2 - 1,
+        color: '#1E293B',
+        radius: Math.random() * 12 + 6,
+        alpha: 0.75,
+        decay: 0.02,
+      });
+    }
+
+    const finalScore = currentScore.current;
+    const finalDist = currentDistance.current;
+
+    // Single Player score handling
+    if (!isMultiplayer) {
+      const isNew = finalScore > highScore;
+      if (isNew) {
+        setIsNewRecord(true);
+        triggerConfetti();
+        soundManager.speakTacticalAlert('ALL-TIME RECORD ACHIEVED.');
+      }
+
+      updateUserScore(userProfile.uid, finalScore, highScore).then(
+        (updatedBest) => {
+          setHighScore(updatedBest);
+          onUpdateProfile({ highScore: updatedBest });
+        }
+      );
+
+      setGameState('gameover');
+    } else if (activeRoom) {
+      // Multiplayer sync
+      syncPlayerRaceState(activeRoom.id, isHost, {
+        y: birdY.current,
+        vy: 0,
+        score: finalScore,
+        distance: finalDist,
+        alive: false,
+      });
+
+      if (!opponent || !opponent.alive) {
+        let winnerUid: string | 'tie' = 'tie';
+        const myScore = finalScore;
+        const opScore = opponent?.score || 0;
+        const myDist = finalDist;
+        const opDist = opponent?.distance || 0;
+
+        if (myScore > opScore || (myScore === opScore && myDist > opDist)) {
+          winnerUid = userProfile.uid;
+          triggerConfetti();
+          soundManager.playWin();
+          soundManager.speakTacticalAlert('RACE WON. TARGET ELIMINATED.');
+          incrementUserWins(userProfile.uid);
+        } else if (opScore > myScore || (opScore === myScore && opDist > myDist)) {
+          winnerUid = opponent ? opponent.uid : userProfile.uid;
+          soundManager.speakTacticalAlert('MISSION FAILED. OPPONENT PREVAILED.');
+        }
+
+        setRaceWinner(winnerUid);
+        setGameState('gameover');
+        finishRace(activeRoom.id, winnerUid);
+      } else {
+        soundManager.speakTacticalAlert('CRAFT DOWNED. SPECTATING OPPONENT.');
+      }
+    }
+  }, [
+    activeCraft.thrusterColor,
+    activeTheme.gatePrimary,
+    highScore,
+    isMultiplayer,
+    activeRoom,
+    isHost,
+    opponent,
+    triggerConfetti,
+    userProfile.uid,
+    onUpdateProfile,
+  ]);
+
+  // PRNG seed for multiplayer
+  useEffect(() => {
+    if (activeRoom && activeRoom.pipeSeed) {
+      let seed = activeRoom.pipeSeed;
+      prngRef.current = () => {
+        seed = (seed * 9301 + 49297) % 233280;
+        return seed / 233280;
+      };
+    } else {
+      prngRef.current = Math.random;
+    }
+  }, [activeRoom?.pipeSeed]);
+
+  // Smooth Opponent Y interpolation
+  useEffect(() => {
+    if (opponent && opponent.y !== undefined) {
+      if (opponent.alive) {
+        targetOpponentY.current = opponent.y;
+      } else {
+        targetOpponentY.current = PLAYABLE_HEIGHT - BIRD_HIT_RADIUS;
+      }
+    }
+  }, [opponent?.y, opponent?.alive]);
+
+  // Track opponent crash event
+  useEffect(() => {
+    if (!isMultiplayer || !opponent) {
+      opponentCrashedRef.current = false;
+      return;
+    }
+    if (opponent.alive) {
+      opponentCrashedRef.current = false;
+    } else if (!opponent.alive && !opponentCrashedRef.current) {
+      opponentCrashedRef.current = true;
+      if (isAlive.current) {
+        soundManager.speakTacticalAlert('OPPONENT DOWNED. SECURE SECTOR TO WIN.');
+      }
+    }
+  }, [isMultiplayer, opponent?.alive]);
+
+  // Check if both players are finished in multiplayer
+  useEffect(() => {
+    if (!isMultiplayer || !activeRoom || gameState !== 'playing') return;
+
+    if (!isAlive.current && opponent && !opponent.alive) {
+      let winnerUid: string | 'tie' = 'tie';
+      const myScore = currentScore.current;
+      const opScore = opponent.score || 0;
+      const myDist = currentDistance.current;
+      const opDist = opponent.distance || 0;
+
+      if (myScore > opScore || (myScore === opScore && myDist > opDist)) {
+        winnerUid = userProfile.uid;
+        triggerConfetti();
+        soundManager.playWin();
+        soundManager.speakTacticalAlert('RACE WON. TARGET ELIMINATED.');
+        incrementUserWins(userProfile.uid);
+      } else if (opScore > myScore || (opScore === myScore && opDist > myDist)) {
+        winnerUid = opponent.uid;
+        soundManager.speakTacticalAlert('MISSION FAILED. OPPONENT PREVAILED.');
+      }
+
+      setRaceWinner(winnerUid);
+      setGameState('gameover');
+      finishRace(activeRoom.id, winnerUid);
+    }
+  }, [
+    isMultiplayer,
+    activeRoom?.id,
+    gameState,
+    opponent?.alive,
+    opponent?.score,
+    opponent?.distance,
+    opponent?.uid,
+    userProfile.uid,
+    triggerConfetti,
+  ]);
+
+  // Multiplayer Room State Transitions
+  useEffect(() => {
+    if (!activeRoom) return;
+
+    if (activeRoom.status === 'countdown') {
+      setGameState('countdown');
+      initGame();
+      const startTime = activeRoom.countdownStart || Date.now();
+      const updateCd = () => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const rem = Math.max(0, 3 - elapsed);
+        setCountdownNum(rem);
+        soundManager.playCountdown(rem);
+        if (rem === 0) {
+          setGameState('playing');
+          gameStartTime.current = performance.now();
+          soundManager.startMusic('intense');
+          soundManager.speakTacticalAlert('THRUSTERS ENGAGED.');
+          if (isHost && activeRoom.status === 'countdown') {
+            beginRacing(activeRoom.id);
+          }
+        }
+      };
+      updateCd();
+      const interval = setInterval(updateCd, 250);
+      return () => clearInterval(interval);
+    }
+
+    if (activeRoom.status === 'racing') {
+      setGameState('playing');
+      gameStartTime.current = performance.now();
+      soundManager.startMusic('intense');
+    }
+
+    if (activeRoom.status === 'finished') {
+      setGameState('gameover');
+      if (activeRoom.winnerUid) {
+        setRaceWinner(activeRoom.winnerUid);
+        if (activeRoom.winnerUid === userProfile.uid) {
+          triggerConfetti();
+          soundManager.playWin();
+          soundManager.speakTacticalAlert('RACE WON. TARGET ELIMINATED.');
+        }
+      }
+    }
+  }, [
+    activeRoom?.status,
+    activeRoom?.countdownStart,
+    activeRoom?.winnerUid,
+    userProfile.uid,
+    initGame,
+    triggerConfetti,
+  ]);
+
+  // Deterministic seeded height calculation
+  const getPipeHeight = useCallback(
+    (pipeIdx: number) => {
+      const minHeight = 65;
+      const maxHeight = PLAYABLE_HEIGHT - PIPE_GAP - minHeight;
+      const seed = activeRoom?.pipeSeed;
+      if (seed) {
+        // High-precision deterministic PRNG based on seed + index
+        const s =
+          ((seed * 1103515245 + pipeIdx * 12345 + 1013904223) >>> 0) /
+          4294967296;
+        return Math.floor(minHeight + s * (maxHeight - minHeight));
+      }
+      return Math.floor(minHeight + Math.random() * (maxHeight - minHeight));
+    },
+    [activeRoom?.pipeSeed]
+  );
+
+  // Spawn Gate Pair
+  const spawnPipe = useCallback(
+    (startX?: number) => {
+      const pipeIdx = pipeSpawnCountRef.current++;
+      const topHeight = getPipeHeight(pipeIdx);
+
+      pipes.current.push({
+        x: startX !== undefined ? startX : 800,
+        topHeight,
+        bottomY: topHeight + PIPE_GAP,
+        width: PIPE_WIDTH,
+        passed: false,
+      });
+    },
+    [getPipeHeight]
+  );
+
+  // Main Canvas Render and Game Loop
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let lastTimestamp = performance.now();
+
+    const loop = (timestamp: number) => {
+      const dt = Math.min((timestamp - lastTimestamp) / 16.66, 2.5);
+      lastTimestamp = timestamp;
+
+      // Dynamic Canvas Sizing & High-DPI Scaling across all devices
+      const container = containerRef.current;
+      if (container && canvas) {
+        const rect = container.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          const dpr = Math.min(window.devicePixelRatio || 1, 2);
+          const targetW = Math.floor(rect.width * dpr);
+          const targetH = Math.floor(rect.height * dpr);
+          if (canvas.width !== targetW || canvas.height !== targetH) {
+            canvas.width = targetW;
+            canvas.height = targetH;
+          }
+
+          // Ensure minimum horizontal runway (560 units) for comfortable reaction time on mobile
+          const MIN_VIRTUAL_WIDTH = 560;
+          const scaleFactor = Math.min(
+            rect.width / MIN_VIRTUAL_WIDTH,
+            rect.height / GAME_HEIGHT
+          );
+          const scale = scaleFactor * dpr;
+
+          const vWidth = rect.width / scaleFactor;
+          const vHeight = rect.height / scaleFactor;
+          const offsetY = Math.max(0, (vHeight - GAME_HEIGHT) / 2);
+
+          virtualWidthRef.current = vWidth;
+          virtualHeightRef.current = vHeight;
+          virtualOffsetYRef.current = offsetY;
+
+          ctx.setTransform(scale, 0, 0, scale, 0, Math.floor(offsetY * scale));
+        }
+      }
+
+      const vWidth = virtualWidthRef.current;
+      const curTheme = activeThemeRef.current;
+
+      // Screen Shake translation
+      if (screenShakeRef.current > 0) {
+        const shakeMagnitude = screenShakeRef.current;
+        const sx = (Math.random() - 0.5) * shakeMagnitude;
+        const sy = (Math.random() - 0.5) * shakeMagnitude;
+        ctx.translate(sx, sy);
+        screenShakeRef.current = Math.max(0, screenShakeRef.current - 0.6 * dt);
+      }
+
+      // Physics & Progression Update (freeze simulation while modal is open)
+      if (!isModalOpen && (gameState === 'playing' || (gameState === 'idle' && !isMultiplayer))) {
+        if (gameState === 'playing') {
+          const elapsedSec =
+            (performance.now() - gameStartTime.current) / 1000;
+          const speedMult =
+            1 +
+            Math.min(
+              0.75,
+              currentScore.current * 0.035 + elapsedSec * 0.0035
+            );
+          currentSpeedMultiplier.current = speedMult;
+          // World motion halts immediately when local craft has crashed!
+          const effectiveSpeed = isAlive.current ? BASE_PIPE_SPEED * speedMult : 0;
+          const effectiveSpacing = BASE_PIPE_SPACING * speedMult;
+
+          const currentWarpFormatted = speedMult.toFixed(1) + 'x';
+          if (currentWarpFormatted !== warpSpeed) {
+            setWarpSpeed(currentWarpFormatted);
+          }
+
+          // Active craft physics (falls to floor if dead)
+          if (isAlive.current) {
+            birdVy.current = Math.min(
+              birdVy.current + GRAVITY * dt,
+              MAX_FALL_SPEED
+            );
+            birdY.current += birdVy.current * dt;
+
+            const targetRotation =
+              birdVy.current < 0
+                ? Math.max(-0.32, birdVy.current * 0.04)
+                : Math.min(0.22, birdVy.current * 0.035);
+            birdRotation.current +=
+              (targetRotation - birdRotation.current) * Math.min(1, 0.065 * dt);
+
+            flapFrame.current += 0.25 * dt;
+
+            // Continuous subtle jet thruster trail
+            if (Math.random() > 0.4) {
+              particles.current.push({
+                x: BIRD_X - 22,
+                y: birdY.current + (Math.random() * 6 - 3),
+                vx: -effectiveSpeed * 1.6 - Math.random() * 2,
+                vy: (Math.random() - 0.5) * 1.5,
+                color:
+                  Math.random() > 0.5
+                    ? activeCraft.thrusterColor
+                    : curTheme.gatePrimary,
+                radius: Math.random() * 3 + 1.2,
+                alpha: 0.8,
+                decay: 0.05,
+              });
+            }
+
+            currentDistance.current += effectiveSpeed * dt;
+            setDistance(Math.floor(currentDistance.current / 10));
+
+            groundOffset.current =
+              (groundOffset.current + effectiveSpeed * dt) % 40;
+            bgCityOffset.current = (bgCityOffset.current + 0.6 * dt) % vWidth;
+
+            // Spawn hurdles deterministically: first gate is at BIRD_X + 500
+            const lastPipe = pipes.current[pipes.current.length - 1];
+            if (!lastPipe) {
+              spawnPipe(BIRD_X + 500);
+            } else if (lastPipe.x <= vWidth + 120) {
+              spawnPipe(lastPipe.x + effectiveSpacing);
+            }
+          }
+
+          // Move hurdles & check scoring / collision (stops when crashed)
+          for (let i = pipes.current.length - 1; i >= 0; i--) {
+            const pipe = pipes.current[i];
+            pipe.x -= effectiveSpeed * dt;
+
+            // Score point
+            if (!pipe.passed && pipe.x + pipe.width < BIRD_X) {
+              pipe.passed = true;
+              currentScore.current += 1;
+              const newScore = currentScore.current;
+              setScore(newScore);
+              soundManager.playScore();
+
+              // 10-Point Milestone: Color shift & praise
+              if (newScore > 0 && newScore % 10 === 0) {
+                const nextStage = getSectorStage(newScore);
+                activeThemeRef.current = nextStage;
+                triggerConfetti();
+                soundManager.playMilestone();
+                soundManager.speakTacticalAlert(
+                  `WARP SECTOR ${newScore / 10 + 1} CLEARED.`
+                );
+
+                if (milestoneTimerRef.current)
+                  clearTimeout(milestoneTimerRef.current);
+                setMilestoneBanner({
+                  headline: nextStage.headline,
+                  subtitle: nextStage.subtitle,
+                  color: nextStage.gatePrimary,
+                });
+                milestoneTimerRef.current = setTimeout(() => {
+                  setMilestoneBanner(null);
+                }, 3500);
+
+                floaters.current.push({
+                  id: Date.now() + Math.random(),
+                  x: vWidth / 2,
+                  y: 160,
+                  text: `⚡ SECTOR CLEAR // +${newScore} PTS! ⚡`,
+                  alpha: 1,
+                  color: nextStage.gatePrimary,
+                });
+              }
+
+              // Gate pass spark particles
+              const gapHeight = pipe.bottomY - pipe.topHeight;
+              for (let p = 0; p < 10; p++) {
+                particles.current.push({
+                  x: pipe.x + pipe.width / 2,
+                  y: pipe.topHeight + gapHeight / 2,
+                  vx: (Math.random() - 0.5) * 5,
+                  vy: (Math.random() - 0.5) * 5,
+                  color: curTheme.gatePrimary,
+                  radius: Math.random() * 3.5 + 1.5,
+                  alpha: 1,
+                  decay: 0.04,
+                });
+              }
+
+              if (isMultiplayer && activeRoom && isAlive.current) {
+                syncPlayerRaceState(activeRoom.id, isHost, {
+                  y: birdY.current,
+                  vy: birdVy.current,
+                  score: currentScore.current,
+                  distance: currentDistance.current,
+                  alive: true,
+                });
+              }
+            }
+
+            // Pipe collision
+            if (isAlive.current) {
+              const inPipeX =
+                BIRD_X + BIRD_HIT_RADIUS > pipe.x &&
+                BIRD_X - BIRD_HIT_RADIUS < pipe.x + pipe.width;
+
+              if (inPipeX) {
+                const hitTop = birdY.current - BIRD_HIT_RADIUS < pipe.topHeight;
+                const hitBottom = birdY.current + BIRD_HIT_RADIUS > pipe.bottomY;
+
+                if (hitTop || hitBottom) {
+                  handleCrash();
+                }
+              }
+            }
+
+            if (pipe.x + pipe.width < -60) {
+              pipes.current.splice(i, 1);
+            }
+          }
+
+          // Ceiling and Floor collision
+          if (isAlive.current) {
+            if (birdY.current - BIRD_HIT_RADIUS <= 0) {
+              birdY.current = BIRD_HIT_RADIUS;
+              birdVy.current = 0;
+            }
+
+            if (birdY.current + BIRD_HIT_RADIUS >= PLAYABLE_HEIGHT) {
+              birdY.current = PLAYABLE_HEIGHT - BIRD_HIT_RADIUS;
+              handleCrash();
+            }
+          } else {
+            // Fallen craft physics - drop down to the pylon floor and rest there
+            if (birdY.current + BIRD_HIT_RADIUS < PLAYABLE_HEIGHT) {
+              birdVy.current = Math.min(
+                birdVy.current + GRAVITY * 1.5 * dt,
+                MAX_FALL_SPEED * 1.2
+              );
+              birdY.current += birdVy.current * dt;
+              birdRotation.current = Math.min(
+                0.55,
+                birdRotation.current + 0.05 * dt
+              );
+            } else {
+              birdY.current = PLAYABLE_HEIGHT - BIRD_HIT_RADIUS;
+              birdVy.current = 0;
+            }
+          }
+
+          // Multiplayer sync interval (tight 75ms heartbeat)
+          if (isMultiplayer && activeRoom && isAlive.current) {
+            const now = Date.now();
+            if (now - lastSyncTime.current > 75) {
+              lastSyncTime.current = now;
+              syncPlayerRaceState(activeRoom.id, isHost, {
+                y: birdY.current,
+                vy: birdVy.current,
+                score: currentScore.current,
+                distance: currentDistance.current,
+                alive: true,
+              });
+            }
+          }
+        } else if (gameState === 'idle') {
+          birdY.current = 260 + Math.sin(timestamp * 0.0035) * 12;
+          birdRotation.current = Math.sin(timestamp * 0.0035) * 0.05;
+          flapFrame.current += 0.15 * dt;
+        }
+      }
+
+      // Smooth opponent Y
+      if (isMultiplayer && opponent) {
+        lastOpponentY.current +=
+          (targetOpponentY.current - lastOpponentY.current) *
+          Math.min(1, 0.25 * dt);
+      }
+
+      // Update particles
+      for (let i = particles.current.length - 1; i >= 0; i--) {
+        const p = particles.current[i];
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.alpha -= p.decay * dt;
+        if (p.alpha <= 0) {
+          particles.current.splice(i, 1);
+        }
+      }
+
+      // Update floaters
+      for (let i = floaters.current.length - 1; i >= 0; i--) {
+        const f = floaters.current[i];
+        f.y -= 1.2 * dt;
+        f.alpha -= 0.02 * dt;
+        if (f.alpha <= 0) {
+          floaters.current.splice(i, 1);
+        }
+      }
+
+      // -------------------------------------------------------------
+      // DRAW CANVAS WORLD
+      // -------------------------------------------------------------
+      const curOffsetY = virtualOffsetYRef.current || 0;
+      ctx.clearRect(0, -curOffsetY, vWidth, GAME_HEIGHT + curOffsetY * 2);
+
+      // Sky Gradient extending upwards seamlessly
+      const skyGrad = ctx.createLinearGradient(0, -curOffsetY, 0, PLAYABLE_HEIGHT);
+      skyGrad.addColorStop(0, curTheme.skyTop);
+      skyGrad.addColorStop(1, curTheme.skyBottom);
+      ctx.fillStyle = skyGrad;
+      ctx.fillRect(0, -curOffsetY, vWidth, PLAYABLE_HEIGHT + curOffsetY);
+
+      // Cyber Stars & Ion Dust
+      ctx.fillStyle = '#FFFFFF';
+      for (let s = 0; s < 30; s++) {
+        const sx = (s * 87 + (timestamp * 0.015)) % vWidth;
+        const sy = (s * 37 - curOffsetY * 0.5) % (PLAYABLE_HEIGHT - 60);
+        ctx.globalAlpha = 0.2 + (Math.sin(timestamp * 0.002 + s) + 1) * 0.25;
+        ctx.fillRect(sx, sy, s % 3 === 0 ? 2 : 1, s % 3 === 0 ? 2 : 1);
+      }
+      ctx.globalAlpha = 1;
+
+      // Parallax City Skyline
+      const buildings = [
+        { w: 45, h: 140, winRows: 6 },
+        { w: 32, h: 90, winRows: 4 },
+        { w: 60, h: 180, winRows: 8 },
+        { w: 38, h: 110, winRows: 5 },
+        { w: 50, h: 160, winRows: 7 },
+      ];
+      const cityXOffset = bgCityOffset.current % 320;
+      let curBx = -cityXOffset;
+      while (curBx < vWidth + 140) {
+        buildings.forEach((b, idx) => {
+          ctx.fillStyle = '#080C18';
+          ctx.fillRect(curBx, PLAYABLE_HEIGHT - b.h, b.w, b.h);
+
+          // Rooftop antenna
+          ctx.strokeStyle = curTheme.gatePrimary;
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(curBx + b.w / 2, PLAYABLE_HEIGHT - b.h);
+          ctx.lineTo(curBx + b.w / 2, PLAYABLE_HEIGHT - b.h - 15);
+          ctx.stroke();
+
+          // Windows
+          ctx.fillStyle =
+            idx % 2 === 0
+              ? 'rgba(0, 240, 255, 0.25)'
+              : 'rgba(255, 0, 127, 0.25)';
+          for (let r = 0; r < b.winRows; r++) {
+            const wy = PLAYABLE_HEIGHT - b.h + 18 + r * 16;
+            ctx.fillRect(curBx + 6, wy, 5, 7);
+            if (b.w > 40) ctx.fillRect(curBx + 20, wy, 5, 7);
+          }
+
+          curBx += b.w + 12;
+        });
+      }
+
+      // Energy Gate Pylons
+      pipes.current.forEach((pipe) => {
+        drawCyberGate(ctx, pipe.x, 0, pipe.width, pipe.topHeight, true, curTheme);
+        drawCyberGate(
+          ctx,
+          pipe.x,
+          pipe.bottomY,
+          pipe.width,
+          PLAYABLE_HEIGHT - pipe.bottomY,
+          false,
+          curTheme
+        );
+
+        // Holographic laser barrier field across gap
+        ctx.save();
+        ctx.globalAlpha = 0.18;
+        ctx.fillStyle = curTheme.gatePrimary;
+        ctx.fillRect(
+          pipe.x + 10,
+          pipe.topHeight,
+          pipe.width - 20,
+          pipe.bottomY - pipe.topHeight
+        );
+
+        ctx.globalAlpha = 0.5;
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(pipe.x + pipe.width / 2, pipe.topHeight);
+        ctx.lineTo(pipe.x + pipe.width / 2, pipe.bottomY);
+        ctx.stroke();
+        ctx.restore();
+      });
+
+      // Ground Highway extending downwards seamlessly
+      ctx.fillStyle = '#050711';
+      ctx.fillRect(0, PLAYABLE_HEIGHT, vWidth, GROUND_HEIGHT + curOffsetY + 60);
+
+      // Neon Horizon Line
+      ctx.save();
+      ctx.shadowColor = curTheme.gridColor;
+      ctx.shadowBlur = 10;
+      ctx.strokeStyle = curTheme.gridColor;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(0, PLAYABLE_HEIGHT);
+      ctx.lineTo(vWidth, PLAYABLE_HEIGHT);
+      ctx.stroke();
+      ctx.restore();
+
+      // Highway perspective lines extending to bottom of screen
+      ctx.strokeStyle = curTheme.gridColor;
+      ctx.lineWidth = 1.2;
+      ctx.globalAlpha = 0.55;
+      for (let x = -groundOffset.current; x < vWidth + 40; x += 40) {
+        ctx.beginPath();
+        ctx.moveTo(x, PLAYABLE_HEIGHT);
+        ctx.lineTo(x - 20, GAME_HEIGHT + curOffsetY + 60);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+
+      // Render Particles
+      particles.current.forEach((p) => {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, p.alpha);
+        ctx.fillStyle = p.color;
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+
+      // Opponent Ghost Bird
+      if (isMultiplayer && opponent) {
+        ctx.save();
+        const deltaDist = (opponent.distance || 0) - currentDistance.current;
+        const oppX = opponent.alive
+          ? BIRD_X + Math.max(-120, Math.min(120, deltaDist)) + (Math.abs(deltaDist) < 10 ? 10 : 0)
+          : BIRD_X + Math.max(-350, deltaDist);
+
+        const oppAngle = opponent.alive
+          ? Math.max(-0.4, Math.min(0.35, (opponent.vy || 0) * 0.05))
+          : 0.55;
+
+        const oppWingCycle = opponent.alive ? flapFrame.current : 0;
+
+        ctx.globalAlpha = opponent.alive ? 0.8 : 0.45;
+        drawCyberBird(
+          ctx,
+          oppX,
+          lastOpponentY.current,
+          oppAngle,
+          oppWingCycle,
+          opponent.color || '#A855F7',
+          true,
+          opponent.alive,
+          curTheme,
+          activeCraft
+        );
+
+        // Pilot Name Tag above opponent
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = opponent.alive ? '#C084FC' : '#EF4444';
+        ctx.fillText(
+          `${opponent.displayName.toUpperCase()} ${opponent.alive ? '' : '[CRASHED]'}`,
+          oppX,
+          lastOpponentY.current - 26
+        );
+
+        ctx.restore();
+      }
+
+      // Main Pilot Craft
+      drawCyberBird(
+        ctx,
+        BIRD_X,
+        birdY.current,
+        birdRotation.current,
+        flapFrame.current,
+        activeCraft.accentColor,
+        false,
+        isAlive.current,
+        curTheme,
+        activeCraft
+      );
+
+      // Entry Guardian Escort Creature (Aero-Chrome Launch Sentinel)
+      drawEntryGuardian(ctx, curTheme, dt, vWidth);
+
+      // Crash Steel Reaper Creature (Chrome Sentinel Reaper)
+      drawSteelReaper(ctx, dt, vWidth, BIRD_X, birdY.current);
+
+      // Render Floaters
+      floaters.current.forEach((f) => {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, f.alpha);
+        ctx.font = '900 15px monospace';
+        ctx.fillStyle = f.color;
+        ctx.shadowColor = f.color;
+        ctx.shadowBlur = 8;
+        ctx.fillText(f.text, f.x, f.y);
+        ctx.restore();
+      });
+
+      // Idle State Guidance overlay
+      if (gameState === 'idle' && !isMultiplayer) {
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.font = '900 17px monospace';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.shadowColor = activeTheme.gatePrimary;
+        ctx.shadowBlur = 12;
+        ctx.fillText('CLICK OR TAP [SPACE] TO ENGAGE THRUSTERS', vWidth / 2, 135);
+
+        ctx.font = 'bold 11px monospace';
+        ctx.fillStyle = activeCraft.accentColor;
+        ctx.shadowBlur = 0;
+        ctx.fillText(
+          `ACTIVE CHASSIS: ${activeCraft.name.toUpperCase()} // ${activeCraft.classType.toUpperCase()}`,
+          vWidth / 2,
+          156
+        );
+        ctx.restore();
+      }
+
+      animFrameId.current = requestAnimationFrame(loop);
+    };
+
+    animFrameId.current = requestAnimationFrame(loop);
+    return () => {
+      if (animFrameId.current) cancelAnimationFrame(animFrameId.current);
+    };
+  }, [
+    gameState,
+    isMultiplayer,
+    activeCraft,
+    spawnPipe,
+    handleCrash,
+    opponent,
+    triggerConfetti,
+    warpSpeed,
+    isModalOpen,
+  ]);
+
+  // Draw Pylon Gate
+  const drawCyberGate = (
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    isTop: boolean,
+    theme: SectorColorStage
+  ) => {
+    ctx.save();
+    const bodyGrad = ctx.createLinearGradient(x, 0, x + width, 0);
+    bodyGrad.addColorStop(0, '#0F172A');
+    bodyGrad.addColorStop(0.5, '#1E293B');
+    bodyGrad.addColorStop(1, '#0B0F19');
+
+    ctx.fillStyle = bodyGrad;
+    ctx.strokeStyle = theme.gatePrimary;
+    ctx.lineWidth = 2;
+    ctx.fillRect(x, y, width, height);
+    ctx.strokeRect(x, y, width, height);
+
+    // Emitter Cap
+    const capH = 34;
+    const capX = x - 6;
+    const capW = width + 12;
+    const capY = isTop ? y + height - capH : y;
+
+    ctx.fillStyle = '#1E293B';
+    ctx.fillRect(capX, capY, capW, capH);
+    ctx.strokeRect(capX, capY, capW, capH);
+
+    // Hazard stripes
+    ctx.fillStyle = theme.gatePrimary;
+    for (let hx = capX + 6; hx < capX + capW - 6; hx += 14) {
+      ctx.fillRect(hx, capY + 6, 5, capH - 12);
+    }
+
+    // Glowing core
+    ctx.shadowColor = theme.gatePrimary;
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(
+      capX + capW / 2,
+      isTop ? capY + capH - 7 : capY + 7,
+      4,
+      0,
+      Math.PI * 2
+    );
+    ctx.fill();
+    ctx.restore();
+  };
+
+  // Dedicated Cyber Bird & Craft Drawing
+  const drawCyberBird = (
+    ctx: CanvasRenderingContext2D,
+    bx: number,
+    by: number,
+    angle: number,
+    wingCycle: number,
+    mainColor: string,
+    isGhost: boolean,
+    alive: boolean,
+    theme: SectorColorStage,
+    craft: typeof activeCraft
+  ) => {
+    ctx.save();
+    ctx.translate(bx, by);
+    ctx.rotate(angle);
+
+    if (isGhost) {
+      ctx.strokeStyle = mainColor;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, BIRD_RADIUS + 5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Rear Jet Engine Thruster
+    ctx.fillStyle = '#1E293B';
+    ctx.strokeStyle = '#475569';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.rect(-BIRD_RADIUS - 6, -6, 8, 12);
+    ctx.fill();
+    ctx.stroke();
+
+    // Jet Engine Flame Glow
+    if (alive) {
+      ctx.fillStyle = craft.thrusterColor;
+      ctx.shadowColor = craft.thrusterColor;
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(-BIRD_RADIUS - 4, 0, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.fillStyle = '#EF4444';
+      ctx.shadowColor = '#EF4444';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(-BIRD_RADIUS - 4, 0, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    // Goddess Celestial Halo & Divine Aura (Only for Goddess craft or Divine State)
+    if (craft.id === 'goddess' && alive) {
+      ctx.save();
+      // Outer celestial aura
+      ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
+      ctx.lineWidth = 3;
+      ctx.shadowColor = '#FFD700';
+      ctx.shadowBlur = 18;
+      ctx.beginPath();
+      ctx.arc(0, 0, BIRD_RADIUS + 7, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Floating Astral Halo
+      ctx.strokeStyle = '#FFE066';
+      ctx.lineWidth = 2.2;
+      ctx.shadowColor = '#FFE066';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.ellipse(0, -BIRD_RADIUS - 7, 14, 4, -0.05, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Halo jewel star
+      ctx.fillStyle = '#00F0FF';
+      ctx.shadowColor = '#00F0FF';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(0, -BIRD_RADIUS - 7, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Hull Gradient
+    const hullGrad = ctx.createLinearGradient(
+      -BIRD_RADIUS,
+      -BIRD_RADIUS,
+      BIRD_RADIUS,
+      BIRD_RADIUS
+    );
+    if (alive) {
+      hullGrad.addColorStop(0, craft.hullColor);
+      hullGrad.addColorStop(0.6, '#0B0F19');
+      hullGrad.addColorStop(1, '#020617');
+    } else {
+      // Breached, charred alloy hull
+      hullGrad.addColorStop(0, '#334155');
+      hullGrad.addColorStop(0.5, '#0F172A');
+      hullGrad.addColorStop(1, '#020617');
+    }
+
+    ctx.fillStyle = hullGrad;
+    ctx.strokeStyle = alive ? mainColor : '#475569';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, BIRD_RADIUS + 4, BIRD_RADIUS, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    if (!alive) {
+      // Charred impact blast scars
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+      ctx.beginPath();
+      ctx.ellipse(-2, 2, 9, 5, 0.4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Kinetic spark arcs across metal hull
+      if (Math.random() < 0.45) {
+        ctx.save();
+        ctx.strokeStyle = '#38BDF8';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        const ax = (Math.random() - 0.5) * 20;
+        const ay = (Math.random() - 0.5) * 14;
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(ax + (Math.random() - 0.5) * 12, ay + (Math.random() - 0.5) * 12);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // Cyber Armor Seam Line
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(0, 0, BIRD_RADIUS - 6, Math.PI * 0.2, Math.PI * 1.2);
+    ctx.stroke();
+
+    // Craft-Specific Wing Rendering
+    const wingFlap = Math.sin(wingCycle * 2.5) * 9 * craft.wingSpanFactor;
+    ctx.save();
+    ctx.translate(-8, wingFlap);
+    ctx.fillStyle = '#1E293B';
+    ctx.strokeStyle = mainColor;
+    ctx.lineWidth = 2;
+
+    if (craft.id === 'phoenix') {
+      // Swept fiery feathered wing
+      ctx.beginPath();
+      ctx.moveTo(-12, -4);
+      ctx.lineTo(14, -12);
+      ctx.lineTo(18, 2);
+      ctx.lineTo(8, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else if (craft.id === 'raven') {
+      // Angular stealth faceted wing
+      ctx.beginPath();
+      ctx.moveTo(-14, -2);
+      ctx.lineTo(12, -10);
+      ctx.lineTo(6, 6);
+      ctx.lineTo(-8, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else if (craft.id === 'hummingbird') {
+      // High frequency kinetic blade
+      ctx.globalAlpha = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(-6, -2);
+      ctx.lineTo(16, -6);
+      ctx.lineTo(10, 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else if (craft.id === 'osprey') {
+      // Heavy turbine nacelle wing
+      ctx.beginPath();
+      ctx.rect(-10, -8, 22, 14);
+      ctx.fill();
+      ctx.stroke();
+      // Hazard accent
+      ctx.fillStyle = craft.accentColor;
+      ctx.fillRect(-6, -6, 4, 10);
+    } else if (craft.id === 'goddess') {
+      // Celestial Golden Feathered Wings with Astral Glow
+      ctx.beginPath();
+      ctx.moveTo(-14, -6);
+      ctx.lineTo(16, -14);
+      ctx.lineTo(24, -2);
+      ctx.lineTo(14, 6);
+      ctx.lineTo(-4, 10);
+      ctx.closePath();
+      const wingGrad = ctx.createLinearGradient(-14, -14, 24, 10);
+      wingGrad.addColorStop(0, '#FFF5C2');
+      wingGrad.addColorStop(0.5, '#FFD700');
+      wingGrad.addColorStop(1, '#B8860B');
+      ctx.fillStyle = wingGrad;
+      ctx.strokeStyle = '#FFE066';
+      ctx.shadowColor = '#FFD700';
+      ctx.shadowBlur = 10;
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Starlight cyan quill vein
+      ctx.strokeStyle = '#00F0FF';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(-10, -2);
+      ctx.lineTo(18, -4);
+      ctx.stroke();
+    } else {
+      // Falcon / Specter standard interceptor wing
+      ctx.beginPath();
+      ctx.moveTo(-10, -4);
+      ctx.lineTo(8, -8);
+      ctx.lineTo(12, 4);
+      ctx.lineTo(-6, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Visor Cockpit
+    if (alive) {
+      ctx.shadowColor = craft.visorColor;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = craft.visorColor;
+      ctx.beginPath();
+      ctx.ellipse(12, -4, 11, 6.5, -0.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Glint
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.ellipse(14, -6, 4.5, 2, -0.1, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Tactical Offline Breached Visor (no cartoon dead eyes, realistic breached canopy)
+      ctx.fillStyle = '#450A0A';
+      ctx.beginPath();
+      ctx.ellipse(12, -4, 11, 6.5, -0.1, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Breach Fracture Lines
+      ctx.strokeStyle = '#F87171';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(6, -8);
+      ctx.lineTo(12, -3);
+      ctx.lineTo(17, -7);
+      ctx.moveTo(12, -3);
+      ctx.lineTo(14, 2);
+      ctx.stroke();
+
+      // Flickering emergency beacon diode
+      if (Math.sin(Date.now() * 0.015) > 0.2) {
+        ctx.fillStyle = '#EF4444';
+        ctx.shadowColor = '#EF4444';
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(8, -4, 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+    }
+
+    // Aerodynamic Beak / Sensor Cone
+    ctx.fillStyle = '#CBD5E1';
+    ctx.strokeStyle = mainColor;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(20, -4);
+    ctx.lineTo(34, 0);
+    ctx.lineTo(20, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.restore();
+  };
+
+  // UNIQUE ENTRY CREATURE: Aero-Chrome Launch Sentinel Guardian
+  const drawEntryGuardian = (
+    ctx: CanvasRenderingContext2D,
+    curTheme: SectorColorStage,
+    dt: number,
+    vWidth: number
+  ) => {
+    const guardian = guardianRef.current;
+    if (guardian.mode === 'cleared') return;
+
+    guardian.time += dt * 0.045;
+
+    if (guardian.mode === 'idle') {
+      // Smooth hovering escort stance ahead and slightly above player craft
+      guardian.x = BIRD_X + 115 + Math.sin(guardian.time * 1.8) * 6;
+      guardian.y = 195 + Math.sin(guardian.time * 2.4) * 8;
+    } else if (guardian.mode === 'launching') {
+      // Supersonic acceleration forward to escort craft into warp
+      guardian.vx += 1.6 * dt;
+      guardian.x += (12 + guardian.vx) * dt;
+
+      // Sonic blast particles
+      if (Math.random() < 0.6) {
+        particles.current.push({
+          x: guardian.x - 26,
+          y: guardian.y + (Math.random() * 8 - 4),
+          vx: -guardian.vx * 1.8,
+          vy: (Math.random() - 0.5) * 2,
+          color: '#00F0FF',
+          radius: Math.random() * 4 + 2,
+          alpha: 0.9,
+          decay: 0.06,
+        });
+      }
+
+      if (guardian.x > vWidth + 140) {
+        guardian.mode = 'cleared';
+        return;
+      }
+    }
+
+    const wingSweep = Math.sin(guardian.time * 3.5) * 12;
+
+    ctx.save();
+    ctx.translate(guardian.x, guardian.y);
+
+    // 1. Rear Ion Plasma Exhaust
+    ctx.shadowColor = '#00F0FF';
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = '#00F0FF';
+    ctx.beginPath();
+    ctx.ellipse(
+      -18,
+      0,
+      guardian.mode === 'launching' ? 14 : 7,
+      3.5,
+      0,
+      0,
+      Math.PI * 2
+    );
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.ellipse(-16, 0, 3, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // 2. Articulated Chrome Back Wing
+    ctx.save();
+    ctx.translate(-6, -4);
+    ctx.rotate((-wingSweep * Math.PI) / 180);
+    ctx.fillStyle = '#334155';
+    ctx.strokeStyle = '#00F0FF';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(24, -18);
+    ctx.lineTo(30, -6);
+    ctx.lineTo(14, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    // 3. Main Chrome Aerospace Fuselage
+    const fuseGrad = ctx.createLinearGradient(-16, -10, 20, 10);
+    fuseGrad.addColorStop(0, '#E2E8F0');
+    fuseGrad.addColorStop(0.5, '#64748B');
+    fuseGrad.addColorStop(1, '#1E293B');
+
+    ctx.fillStyle = fuseGrad;
+    ctx.strokeStyle = '#00F0FF';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-16, 0);
+    ctx.lineTo(-4, -10);
+    ctx.lineTo(16, -6);
+    ctx.lineTo(28, 0);
+    ctx.lineTo(16, 6);
+    ctx.lineTo(-4, 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Accent cyan light piping
+    ctx.strokeStyle = '#38BDF8';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-10, 0);
+    ctx.lineTo(18, 0);
+    ctx.stroke();
+
+    // 4. Fore Articulated Wing (Foreground)
+    ctx.save();
+    ctx.translate(2, 2);
+    ctx.rotate((wingSweep * 0.9 * Math.PI) / 180);
+    const foreWingGrad = ctx.createLinearGradient(0, 0, 34, -22);
+    foreWingGrad.addColorStop(0, '#F8FAFC');
+    foreWingGrad.addColorStop(0.5, '#94A3B8');
+    foreWingGrad.addColorStop(1, '#334155');
+    ctx.fillStyle = foreWingGrad;
+    ctx.strokeStyle = '#00F0FF';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(28, -22);
+    ctx.lineTo(36, -12);
+    ctx.lineTo(16, 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Cyan energy feather conduits
+    ctx.fillStyle = '#00F0FF';
+    ctx.beginPath();
+    ctx.moveTo(8, -4);
+    ctx.lineTo(26, -16);
+    ctx.lineTo(20, -2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // 5. Visor / Sensor Eye
+    ctx.fillStyle = '#00F0FF';
+    ctx.shadowColor = '#00F0FF';
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.ellipse(18, -1, 5, 2.5, 0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // 6. Beak / Sensor Cone
+    ctx.fillStyle = '#CBD5E1';
+    ctx.strokeStyle = '#00F0FF';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(24, -3);
+    ctx.lineTo(34, 0);
+    ctx.lineTo(24, 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.restore();
+
+    // 7. Holographic Flight Corridor Projection (During Idle)
+    if (guardian.mode === 'idle') {
+      ctx.save();
+      const projX = guardian.x + 20;
+      const projY = guardian.y + 4;
+
+      // Translucent cyan guide cone extending to the right
+      const coneGrad = ctx.createLinearGradient(
+        projX,
+        projY,
+        projX + 160,
+        projY + 20
+      );
+      coneGrad.addColorStop(0, 'rgba(0, 240, 255, 0.28)');
+      coneGrad.addColorStop(0.6, 'rgba(0, 240, 255, 0.08)');
+      coneGrad.addColorStop(1, 'rgba(0, 240, 255, 0)');
+      ctx.fillStyle = coneGrad;
+      ctx.beginPath();
+      ctx.moveTo(projX, projY);
+      ctx.lineTo(projX + 160, projY - 24);
+      ctx.lineTo(projX + 160, projY + 24);
+      ctx.closePath();
+      ctx.fill();
+
+      // Guide line
+      ctx.strokeStyle = 'rgba(0, 240, 255, 0.4)';
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(projX, projY);
+      ctx.lineTo(projX + 160, projY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Floating Entry HUD Label
+      ctx.font = '900 11px monospace';
+      ctx.fillStyle = '#00F0FF';
+      ctx.shadowColor = '#00F0FF';
+      ctx.shadowBlur = 8;
+      ctx.textAlign = 'left';
+      ctx.fillText('GUARDIAN ESCORT // RUNWAY SECURE', projX + 25, projY - 14);
+
+      ctx.font = 'bold 9px monospace';
+      ctx.fillStyle = '#94A3B8';
+      ctx.shadowBlur = 0;
+      ctx.fillText(
+        'PRESS [SPACE] / TAP TO COMMENCE TAKEOFF',
+        projX + 25,
+        projY + 16
+      );
+
+      ctx.restore();
+    }
+  };
+
+  // UNIQUE CRASH CREATURE: Chrome Sentinel Reaper (Scans the dead bird with crimson laser)
+  const drawSteelReaper = (
+    ctx: CanvasRenderingContext2D,
+    dt: number,
+    vWidth: number,
+    downedX: number,
+    downedY: number
+  ) => {
+    const reaper = reaperRef.current;
+    if (!reaper.active) return;
+
+    reaper.time += dt * 0.04;
+    reaper.targetX = downedX + 45;
+    reaper.targetY = Math.max(65, downedY - 75);
+
+    // Smooth movement toward target above downed bird
+    const dx = reaper.targetX - reaper.x;
+    const dy = reaper.targetY - reaper.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > 5) {
+      reaper.x += dx * Math.min(1, 0.09 * dt);
+      reaper.y += dy * Math.min(1, 0.09 * dt);
+    } else {
+      reaper.arrived = true;
+    }
+
+    // Hover bobbing when arrived
+    const hoverY =
+      reaper.y + (reaper.arrived ? Math.sin(reaper.time * 2.6) * 5 : 0);
+    const hoverX =
+      reaper.x + (reaper.arrived ? Math.cos(reaper.time * 1.8) * 3 : 0);
+    const wingSwing = Math.sin(reaper.time * 3.2) * 14;
+
+    ctx.save();
+    ctx.translate(hoverX, hoverY);
+
+    // Face left towards the downed bird
+    ctx.scale(-1, 1);
+
+    // 1. Thruster Jet Particles
+    if (Math.random() < 0.35) {
+      particles.current.push({
+        x: hoverX + (Math.random() * 10 - 5),
+        y: hoverY + 14,
+        vx: (Math.random() - 0.5) * 1.5,
+        vy: Math.random() * 2 + 1,
+        color: Math.random() > 0.5 ? '#EF4444' : '#F97316',
+        radius: Math.random() * 3 + 1,
+        alpha: 0.7,
+        decay: 0.05,
+      });
+    }
+
+    // 2. Mechanical Steel Wings (Articulated Razor Plates)
+    // Left / Back Wing
+    ctx.save();
+    ctx.translate(-8, -4);
+    ctx.rotate((wingSwing * Math.PI) / 180);
+    ctx.fillStyle = '#1E293B';
+    ctx.strokeStyle = '#EF4444';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-24, -18);
+    ctx.lineTo(-32, -4);
+    ctx.lineTo(-18, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Inner blade edge
+    ctx.fillStyle = '#64748B';
+    ctx.beginPath();
+    ctx.moveTo(-6, 0);
+    ctx.lineTo(-20, -12);
+    ctx.lineTo(-14, 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // 3. Steel Mecha Fuselage / Torso
+    const torsoGrad = ctx.createLinearGradient(-14, -14, 18, 14);
+    torsoGrad.addColorStop(0, '#64748B');
+    torsoGrad.addColorStop(0.4, '#1E293B');
+    torsoGrad.addColorStop(1, '#0B0F19');
+
+    ctx.fillStyle = torsoGrad;
+    ctx.strokeStyle = '#94A3B8';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-16, -6);
+    ctx.lineTo(8, -12);
+    ctx.lineTo(22, -2);
+    ctx.lineTo(14, 12);
+    ctx.lineTo(-10, 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Crimson energy conduit line
+    ctx.strokeStyle = '#EF4444';
+    ctx.lineWidth = 1.8;
+    ctx.shadowColor = '#EF4444';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(-8, 0);
+    ctx.lineTo(12, 0);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // 4. Steel Raptor Talons (deploying downward toward wreckage)
+    ctx.strokeStyle = '#CBD5E1';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-4, 10);
+    ctx.lineTo(-8, 18);
+    ctx.lineTo(-4, 22);
+    ctx.moveTo(4, 10);
+    ctx.lineTo(2, 18);
+    ctx.lineTo(6, 23);
+    ctx.stroke();
+
+    // 5. Fore Wing (Front Articulated Chrome Razor)
+    ctx.save();
+    ctx.translate(4, -2);
+    ctx.rotate((-wingSwing * 0.9 * Math.PI) / 180);
+    const wingGrad = ctx.createLinearGradient(0, 0, 36, -26);
+    wingGrad.addColorStop(0, '#94A3B8');
+    wingGrad.addColorStop(0.5, '#334155');
+    wingGrad.addColorStop(1, '#0F172A');
+    ctx.fillStyle = wingGrad;
+    ctx.strokeStyle = '#F8FAFC';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(26, -24);
+    ctx.lineTo(36, -16);
+    ctx.lineTo(18, 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Chrome feathers
+    ctx.fillStyle = '#CBD5E1';
+    ctx.beginPath();
+    ctx.moveTo(10, -6);
+    ctx.lineTo(30, -20);
+    ctx.lineTo(20, -2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // 6. Cybernetic Sensor Head & Crimson Ocular Eye
+    ctx.fillStyle = '#0F172A';
+    ctx.strokeStyle = '#EF4444';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(16, -4);
+    ctx.lineTo(30, -2);
+    ctx.lineTo(26, 6);
+    ctx.lineTo(14, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Glowing Ocular Scanner Eye
+    ctx.fillStyle = '#EF4444';
+    ctx.shadowColor = '#EF4444';
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(23, 0, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.restore(); // restore translate / flip
+
+    // 7. Volumetric Targeting Laser Scanning Down onto Fallen Bird!
+    if (reaper.arrived) {
+      ctx.save();
+      const eyeX = hoverX - 23;
+      const eyeY = hoverY;
+
+      // Volumetric laser cone
+      const coneGrad = ctx.createLinearGradient(eyeX, eyeY, downedX, downedY);
+      coneGrad.addColorStop(0, 'rgba(239, 68, 68, 0.55)');
+      coneGrad.addColorStop(0.7, 'rgba(239, 68, 68, 0.18)');
+      coneGrad.addColorStop(1, 'rgba(239, 68, 68, 0)');
+
+      ctx.fillStyle = coneGrad;
+      ctx.beginPath();
+      ctx.moveTo(eyeX, eyeY);
+      ctx.lineTo(downedX - 35, downedY + 12);
+      ctx.lineTo(downedX + 35, downedY + 12);
+      ctx.closePath();
+      ctx.fill();
+
+      // Sweeping horizontal laser bar across the dead bird
+      const sweepY = downedY - 14 + ((Math.sin(reaper.time * 4) + 1) / 2) * 26;
+      ctx.strokeStyle = '#EF4444';
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = '#EF4444';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.moveTo(downedX - 28, sweepY);
+      ctx.lineTo(downedX + 28, sweepY);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Wireframe target box around downed bird
+      ctx.strokeStyle = 'rgba(239, 68, 68, 0.6)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(downedX - 25, downedY - 20, 50, 36);
+
+      // Monospace HUD Readout over the fallen wreckage
+      ctx.font = '900 11px monospace';
+      ctx.fillStyle = '#EF4444';
+      ctx.textAlign = 'center';
+      ctx.fillText('[STEEL REAPER // HARVEST PROTOCOL]', downedX, downedY - 32);
+      ctx.font = 'bold 9px monospace';
+      ctx.fillStyle = '#FCA5A5';
+      ctx.fillText(
+        'TARGET STATUS: OFFLINE // HULL INTEGRITY 0%',
+        downedX,
+        downedY - 21
+      );
+
+      ctx.restore();
+    }
+  };
+
+  // Keyboard controls
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Disallow key triggers when any modal (Crafts & Themes, Welcome, Hall of Fame) is open
+      if (isModalOpen) return;
+
+      if (e.code === 'Space' || e.code === 'ArrowUp') {
+        e.preventDefault();
+        handleFlap();
+      } else if (e.code === 'KeyR') {
+        e.preventDefault();
+        handleRestart();
+      } else if (e.code === 'KeyM') {
+        e.preventDefault();
+        handleToggleMusic();
+      } else if (e.code === 'KeyS') {
+        e.preventDefault();
+        handleToggleSfx();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleFlap, isModalOpen]);
+
+  // Restart match in single or rematch in multiplayer
+  const handleRestart = async () => {
+    if (isMultiplayer && activeRoom) {
+      if (rematchLoading) return;
+      try {
+        setRematchLoading(true);
+        soundManager.speakTacticalAlert('REMATCH SEQUENCE INITIATED.');
+        await restartRoomMatch(activeRoom.id, activeRoom.host, activeRoom.guest);
+      } catch (err) {
+        console.warn('Error restarting multiplayer race:', err);
+      } finally {
+        setRematchLoading(false);
+      }
+    } else {
+      initGame();
+      setGameState('idle');
+      soundManager.startMusic('ambient');
+    }
+  };
+
+  return (
+    <div
+      id="flappy-game-wrapper"
+      className="relative w-full h-full flex-1 flex flex-col items-center select-none overflow-hidden"
+    >
+      <div
+        id="canvas-container"
+        ref={containerRef}
+        className="relative w-full h-full flex-1 overflow-hidden bg-slate-950 cursor-pointer touch-none flex flex-col"
+        onClick={handleFlap}
+        onTouchStart={(e) => {
+          e.preventDefault();
+          handleFlap();
+        }}
+      >
+        <canvas
+          ref={canvasRef}
+          id="flappy-canvas"
+          className="w-full h-full block"
+        />
+
+        {/* Minimalist Aerospace Top HUD */}
+        <div className="absolute top-2 sm:top-3 inset-x-2 sm:inset-x-4 flex items-center justify-between pointer-events-none z-10 font-mono gap-1 sm:gap-2">
+          {/* Top-Left: Pilot Avatar, Warp Speed, Dynamic Sector, & Flight Mode */}
+          <div className="flex items-center gap-1 sm:gap-1.5 pointer-events-auto min-w-0">
+            {/* Pilot Callsign Avatar */}
+            {isGoogleUser ? (
+              <button
+                id="hud-pilot-status-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onOpenAuthModal) onOpenAuthModal();
+                }}
+                className="relative p-0.5 rounded-full bg-slate-950/90 hover:bg-slate-900 border-2 border-cyan-400 hover:border-cyan-300 shadow-[0_0_12px_rgba(0,240,255,0.4)] transition-all cursor-pointer group shrink-0"
+                title={`Pilot: ${userProfile.displayName} // Callsign Verified`}
+                aria-label="Pilot Profile"
+              >
+                {userProfile.photoURL ? (
+                  <img
+                    src={userProfile.photoURL}
+                    alt={userProfile.displayName}
+                    className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-slate-800 text-cyan-300 font-bold flex items-center justify-center text-xs">
+                    {userProfile.displayName.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <span className="absolute bottom-0 right-0 w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-emerald-400 border-2 border-slate-950 animate-pulse" />
+              </button>
+            ) : (
+              <button
+                id="hud-guest-signin-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onOpenAuthModal) onOpenAuthModal();
+                  else if (onLoginGoogle) onLoginGoogle();
+                }}
+                className="p-1.5 sm:p-2 rounded-full bg-amber-950/80 hover:bg-amber-900 border border-amber-400/80 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.35)] animate-pulse transition-all cursor-pointer flex items-center justify-center shrink-0"
+                title="Sign in with Google to post your score to Leaderboard"
+                aria-label="Sign in with Google"
+              >
+                <LogIn className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
+              </button>
+            )}
+
+            <div className="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg bg-slate-950/90 border border-cyan-500/40 text-cyan-400 text-[10px] sm:text-xs font-bold flex items-center gap-1 shadow-[0_0_10px_rgba(0,240,255,0.2)] shrink-0">
+              <Zap className="w-3 h-3 text-cyan-400 animate-pulse" />
+              <span className="hidden xs:inline">WARP</span>
+              <span>{warpSpeed}</span>
+            </div>
+
+            <div
+              className="hidden md:flex items-center px-2.5 py-1.5 rounded-lg bg-slate-950/90 border text-xs font-bold gap-1.5 transition-all duration-300 shrink-0"
+              style={{
+                borderColor: activeTheme.gatePrimary,
+                color: activeTheme.gatePrimary,
+                boxShadow: `0 0 12px ${activeTheme.gateGlow}`,
+              }}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>{activeTheme.sectorName}</span>
+            </div>
+
+            {/* Direct Flight Mode Switcher */}
+            {onSelectMode && (
+              <div className="flex items-center p-0.5 rounded-lg bg-slate-950/90 border border-cyan-500/40 shadow-[0_0_10px_rgba(0,240,255,0.2)] shrink-0">
+                <button
+                  id="hud-mode-single-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectMode('single');
+                  }}
+                  className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md text-[10px] sm:text-[11px] font-black transition-all flex items-center gap-1 cursor-pointer ${
+                    currentMode === 'single'
+                      ? 'bg-cyan-500 text-slate-950 shadow-[0_0_8px_rgba(0,240,255,0.5)]'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Single Player Endless Warp Mode"
+                >
+                  <Gamepad2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  <span className="hidden sm:inline">SOLO</span>
+                </button>
+
+                <button
+                  id="hud-mode-multiplayer-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectMode('multiplayer');
+                  }}
+                  className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md text-[10px] sm:text-[11px] font-black transition-all flex items-center gap-1 cursor-pointer ${
+                    currentMode === 'multiplayer'
+                      ? 'bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-[0_0_8px_rgba(168,85,247,0.5)]'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Multiplayer 1v1 Quantum Duel"
+                >
+                  <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-purple-400" />
+                  <span className="hidden sm:inline">DUEL</span>
+                  <span className="sm:hidden">2P</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Top-Right: Opponent Telemetry, Sound, Origin, Rankings, Themes, Fullscreen */}
+          <div className="flex items-center gap-1 sm:gap-1.5 pointer-events-auto shrink-0">
+            {isMultiplayer && opponent && (
+              <div className={`px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg border text-[10px] sm:text-xs font-bold ${
+                opponent.alive
+                  ? 'bg-purple-950/90 border-purple-500/40 text-purple-300'
+                  : 'bg-red-950/90 border-red-500/50 text-red-300'
+              }`}>
+                {opponent.displayName.slice(0, 6)}: {opponent.score}
+                <span className="hidden sm:inline">{opponent.alive ? ' pts' : ' (CRASH)'}</span>
+              </div>
+            )}
+
+            {/* Background Music Toggle */}
+            <button
+              id="hud-music-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleToggleMusic();
+              }}
+              className={`p-1.5 sm:p-2 rounded-lg border transition-all cursor-pointer ${
+                !musicMuted
+                  ? 'bg-purple-950/80 border-purple-400 text-purple-300 shadow-[0_0_10px_rgba(168,85,247,0.3)]'
+                  : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-white'
+              }`}
+              title={!musicMuted ? 'Mute Music' : 'Play Music'}
+              aria-label="Toggle Music"
+            >
+              <Music className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            </button>
+
+            {/* Sound FX Toggle */}
+            <button
+              id="hud-mute-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleToggleSfx();
+              }}
+              className={`p-1.5 sm:p-2 rounded-lg border transition-all cursor-pointer ${
+                !sfxMuted
+                  ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300 shadow-[0_0_10px_rgba(0,240,255,0.3)]'
+                  : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-white'
+              }`}
+              title={!sfxMuted ? 'Mute SFX' : 'Unmute SFX'}
+              aria-label="Toggle Sound Effects"
+            >
+              {!sfxMuted ? (
+                <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              ) : (
+                <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              )}
+            </button>
+
+            {/* 2014 Origin Story & Goddess Awakening Cinematic Trigger */}
+            {onOpenCinematic && (
+              <button
+                id="hud-cinematic-intro-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenCinematic();
+                }}
+                className="p-1.5 sm:px-2.5 sm:py-1.5 bg-slate-900/90 hover:bg-slate-800 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-[0_0_10px_rgba(245,158,11,0.2)] hover:border-amber-400 group"
+                title="Watch 2014 Origin & Goddess Awakening Cinematic"
+                aria-label="Origin Story Cinematic"
+              >
+                <Film className="w-3.5 h-3.5 text-amber-400 group-hover:rotate-12 transition-transform" />
+                <span className="hidden lg:inline">2014 ORIGIN</span>
+              </button>
+            )}
+
+            {/* On-Screen Global Pilot Hall of Fame Button */}
+            {onOpenLeaderboard && (
+              <button
+                id="hud-hall-of-fame-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenLeaderboard();
+                }}
+                className="p-1.5 sm:px-2.5 sm:py-1.5 bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-500/50 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-[0_0_12px_rgba(245,158,11,0.25)] hover:border-amber-400 group"
+                title="Global Pilot Hall of Fame"
+                aria-label="Hall of Fame"
+              >
+                <Trophy className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
+                <span className="hidden sm:inline">RANKINGS</span>
+              </button>
+            )}
+
+            {/* Theme & Craft Config Button */}
+            {onOpenThemeWindow && (
+              <button
+                id="hud-theme-system-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenThemeWindow();
+                }}
+                className="p-1.5 sm:px-2.5 sm:py-1.5 bg-slate-950/90 hover:bg-slate-800 text-cyan-400 border border-cyan-500/40 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-[0_0_10px_rgba(0,240,255,0.2)]"
+                title="Craft Fleet & Sector Themes"
+                aria-label="Craft Fleet & Sector Themes"
+              >
+                <Palette className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">CRAFTS</span>
+              </button>
+            )}
+
+            <button
+              id="fullscreen-toggle-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleFullscreen();
+              }}
+              title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+              aria-label={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+              className="p-1.5 sm:p-2 bg-slate-950/90 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-lg transition-all cursor-pointer"
+            >
+              {isFullscreen ? (
+                <Minimize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              ) : (
+                <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Live Centered Score */}
+        {gameState === 'playing' && (
+          <div className="absolute top-12 left-1/2 -translate-x-1/2 pointer-events-none text-center font-mono">
+            <span
+              className="text-6xl sm:text-7xl font-black tracking-wider transition-colors duration-500"
+              style={{
+                color: '#FFFFFF',
+                textShadow: `0 0 20px ${activeTheme.gatePrimary}, 0 0 45px ${activeTheme.gatePrimary}`,
+              }}
+            >
+              {score}
+            </span>
+          </div>
+        )}
+
+        {/* Multiplayer Spectating HUD when local player is crashed */}
+        {isMultiplayer && !isAlive.current && opponent && opponent.alive && (
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-20 pointer-events-none font-mono">
+            <div className="px-4 py-2 rounded-xl bg-red-950/90 border border-red-500/60 shadow-[0_0_20px_rgba(239,68,68,0.4)] text-center animate-pulse">
+              <p className="text-xs font-black text-red-400 tracking-wider">
+                ⚠️ HULL INTEGRITY LOST // DOWNED IN SECTOR
+              </p>
+              <p className="text-[11px] text-slate-300 font-bold">
+                SPECTATING {opponent.displayName.toUpperCase()} (SCORE: {opponent.score || 0})
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Pre-Flight Pilot Registration Clearance Card (Before Flight Commences) */}
+        {gameState === 'idle' && !isMultiplayer && !isGuestDismissed && !guestBypassedState && (
+          <div
+            id="pre-flight-clearance-card"
+            className="absolute top-16 sm:top-20 left-1/2 -translate-x-1/2 z-20 pointer-events-auto font-mono w-[94%] max-w-md animate-in fade-in slide-in-from-top-3 duration-300"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-950/92 backdrop-blur-md border border-cyan-500/40 shadow-[0_0_35px_rgba(0,240,255,0.25)] space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${isGoogleUser ? 'bg-emerald-400' : 'bg-amber-400 animate-ping'}`} />
+                  <span className="text-[11px] font-black uppercase tracking-wider text-cyan-400">
+                    {isGoogleUser ? 'PILOT CLEARANCE: VERIFIED' : 'CALLSIGN AUTHENTICATION NEEDED'}
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-400">
+                  {isGoogleUser ? 'SECTOR RANKED' : 'LEADERBOARD GATE'}
+                </span>
+              </div>
+
+              {isGoogleUser ? (
+                <div className="flex items-center justify-between bg-slate-900/80 p-2.5 rounded-xl border border-cyan-500/30">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {userProfile.photoURL ? (
+                      <img
+                        src={userProfile.photoURL}
+                        alt={userProfile.displayName}
+                        className="w-8 h-8 rounded-full border border-cyan-400 object-cover shrink-0"
+                      />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-slate-800 text-cyan-300 font-bold flex items-center justify-center text-xs shrink-0 border border-cyan-400">
+                        {userProfile.displayName.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-white truncate">
+                        PILOT: {userProfile.displayName}
+                      </p>
+                      <p className="text-[10px] text-emerald-400 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> Callsign connected to Global Leaderboard
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0 pl-2">
+                    <span className="text-[10px] text-slate-400 block">BEST</span>
+                    <span className="text-xs font-black text-amber-400">{highScore} pts</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-slate-200 font-semibold leading-relaxed">
+                    Log in with your Google account before takeoff so your flight callsign, avatar, and high score are recorded on the <span className="text-cyan-400 font-bold">Global Leaderboard</span>!
+                  </p>
+
+                  <div className="flex items-center gap-2 pt-0.5">
+                    <button
+                      id="idle-google-signin-action-btn"
+                      onClick={() => {
+                        if (onOpenAuthModal) onOpenAuthModal();
+                        else if (onLoginGoogle) onLoginGoogle();
+                      }}
+                      className="flex-1 py-2 px-3 bg-white hover:bg-slate-100 text-slate-900 font-black rounded-xl text-xs uppercase font-mono transition-all shadow-[0_0_15px_rgba(255,255,255,0.3)] flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+                    >
+                      <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.14z"/>
+                        <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.26 21.36 7.34 24 12 24z"/>
+                        <path fill="#FBBC05" d="M5.28 14.27A7.06 7.06 0 0 1 4.9 12c0-.79.14-1.55.38-2.27V6.58H1.26A11.96 11.96 0 0 0 0 12c0 1.92.45 3.74 1.26 5.42l4.02-3.15z"/>
+                        <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+                      </svg>
+                      <span>LOG IN WITH GOOGLE</span>
+                    </button>
+
+                    <button
+                      id="idle-guest-bypass-btn"
+                      onClick={() => {
+                        guestBypassedAuthRef.current = true;
+                        setGuestBypassedState(true);
+                        if (onDismissGuestClearance) onDismissGuestClearance();
+                      }}
+                      className="py-2 px-3 bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700 rounded-xl text-[11px] font-mono transition-colors cursor-pointer"
+                    >
+                      Fly as Guest
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Top Milestone Banner */}
+        {milestoneBanner && (
+          <div
+            id="top-milestone-praise-banner"
+            className="absolute top-24 sm:top-28 left-1/2 -translate-x-1/2 z-30 pointer-events-none w-full max-w-sm px-4 animate-in slide-in-from-top-3 fade-in duration-300 font-mono"
+          >
+            <div
+              className="w-full py-2.5 px-4 rounded-xl bg-slate-950/95 border text-center space-y-0.5 shadow-2xl"
+              style={{
+                borderColor: milestoneBanner.color,
+                boxShadow: `0 0 35px ${milestoneBanner.color}80`,
+              }}
+            >
+              <div
+                className="text-sm sm:text-base font-black tracking-wider uppercase"
+                style={{ color: milestoneBanner.color }}
+              >
+                {milestoneBanner.headline}
+              </div>
+              <p className="text-[11px] font-bold text-slate-300">
+                {milestoneBanner.subtitle}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Countdown Overlay */}
+        {gameState === 'countdown' && (
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center text-white pointer-events-none space-y-3 font-mono">
+            <p className="text-xs font-bold tracking-widest text-cyan-400">
+              QUANTUM TELEMETRY SYNCHRONIZATION
+            </p>
+            <div className="text-8xl font-black text-cyan-400 drop-shadow-[0_0_30px_#00F0FF] animate-bounce">
+              {countdownNum}
+            </div>
+            <p className="text-xs text-slate-400">
+              INITIALIZING PROPULSION DRIVE...
+            </p>
+          </div>
+        )}
+
+        {/* STREAMLINED HIGH-TECH AEROSPACE CRASH TELEMETRY HUD */}
+        {gameState === 'gameover' && (
+          <div
+            id="game-over-overlay"
+            className="absolute bottom-3 sm:bottom-6 left-1/2 -translate-x-1/2 w-[94%] max-w-lg z-30 pointer-events-auto font-mono animate-in slide-in-from-bottom-4 duration-300"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-slate-950/85 backdrop-blur-md border border-rose-500/40 rounded-2xl p-3.5 sm:p-4.5 shadow-[0_0_35px_rgba(244,63,94,0.25)] space-y-3">
+              {/* Tactical Status & Chassis Readout */}
+              <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+                  <span className="text-xs sm:text-sm font-black text-rose-400 tracking-wider">
+                    {isMultiplayer
+                      ? raceWinner === userProfile.uid
+                        ? 'TARGET DOWN // RACE WON'
+                        : 'MISSION DEFEAT // RECOVERY ACTIVE'
+                      : 'HULL INTEGRITY 0% // CRITICAL IMPACT'}
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-400">
+                  CHASSIS: {activeCraft.name.split(' ')[0].toUpperCase()}
+                </span>
+              </div>
+
+              {/* Minimalist 3-Metric HUD Bar */}
+              <div className="grid grid-cols-3 gap-2 text-center py-0.5">
+                <div className="p-2 sm:p-2.5 rounded-xl bg-slate-900/70 border border-slate-800/80">
+                  <span className="text-[10px] text-slate-400 block uppercase">GATES</span>
+                  <span className="text-2xl sm:text-3xl font-black text-cyan-400 drop-shadow-[0_0_12px_rgba(0,240,255,0.5)]">
+                    {score}
+                  </span>
+                </div>
+                <div className="p-2 sm:p-2.5 rounded-xl bg-slate-900/70 border border-slate-800/80">
+                  <span className="text-[10px] text-slate-400 block uppercase">WARP VELOCITY</span>
+                  <span className="text-2xl sm:text-3xl font-black text-amber-400">
+                    {warpSpeed}
+                  </span>
+                </div>
+                <div className="p-2 sm:p-2.5 rounded-xl bg-slate-900/70 border border-slate-800/80">
+                  <span className="text-[10px] text-slate-400 block uppercase">
+                    {isNewRecord ? 'NEW RECORD!' : 'BEST RECORD'}
+                  </span>
+                  <span className="text-2xl sm:text-3xl font-black text-emerald-400">
+                    {highScore}
+                  </span>
+                </div>
+              </div>
+
+              {/* Leaderboard Post Status / Google Login Prompt */}
+              {isGoogleUser ? (
+                <div className="px-3 py-1.5 rounded-xl bg-cyan-950/50 border border-cyan-500/30 flex items-center justify-between text-xs text-cyan-300">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                    <span className="truncate text-[11px]">
+                      Callsign <strong>{userProfile.displayName}</strong> linked to Leaderboard
+                    </span>
+                  </div>
+                  <span className="text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-2 py-0.5 rounded-md shrink-0 font-bold">
+                    RANKED
+                  </span>
+                </div>
+              ) : (
+                <div
+                  onClick={() => {
+                    if (onOpenAuthModal) onOpenAuthModal();
+                    else if (onLoginGoogle) onLoginGoogle();
+                  }}
+                  className="px-3 py-2 rounded-xl bg-amber-950/70 hover:bg-amber-900/80 border border-amber-500/50 text-amber-200 text-xs flex items-center justify-between gap-2 cursor-pointer transition-all shadow-[0_0_15px_rgba(245,158,11,0.2)]"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping shrink-0" />
+                    <span className="text-[11px] truncate text-slate-200">
+                      Guest run: <strong className="text-amber-400 font-black">{score} pts</strong>. Post to Global Leaderboard?
+                    </span>
+                  </div>
+                  <span className="px-2 py-1 bg-amber-400 text-slate-950 font-black rounded-lg text-[10px] uppercase shrink-0">
+                    SIGN IN
+                  </span>
+                </div>
+              )}
+
+              {/* Primary Action Button: Glowing Cyber Reboot */}
+              <div className="space-y-2">
+                {isMultiplayer ? (
+                  <button
+                    id="rematch-race-btn"
+                    disabled={rematchLoading}
+                    onClick={handleRestart}
+                    className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-950/60 disabled:text-emerald-400/50 text-slate-950 font-black rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center gap-2 cursor-pointer text-xs uppercase tracking-wider active:scale-98"
+                  >
+                    <RotateCcw className={`w-4 h-4 ${rematchLoading ? 'animate-spin' : ''}`} />
+                    <span>
+                      {rematchLoading
+                        ? 'SYNCHRONIZING REMATCH...'
+                        : 'RE-ENGAGE QUANTUM DUEL [SPACE / R]'}
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    id="play-again-single-btn"
+                    onClick={handleRestart}
+                    className="w-full py-3 sm:py-3.5 px-4 bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black rounded-xl shadow-[0_0_25px_rgba(0,240,255,0.4)] transition-all active:scale-98 flex items-center justify-center gap-2 cursor-pointer text-xs uppercase tracking-wider"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>REBOOT CHASSIS & THRUSTERS [SPACE / CLICK]</span>
+                  </button>
+                )}
+
+                {/* Quick Clean Action Buttons */}
+                <div className="flex items-center gap-2">
+                  {onOpenLeaderboard && (
+                    <button
+                      id="view-leaderboard-from-gameover-btn"
+                      onClick={onOpenLeaderboard}
+                      className="flex-1 py-2 px-3 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                      <span>PILOT RANKINGS</span>
+                    </button>
+                  )}
+
+                  {onOpenThemeWindow && (
+                    <button
+                      id="open-theme-from-gameover-btn"
+                      onClick={onOpenThemeWindow}
+                      className="flex-1 py-2 px-3 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Palette className="w-3.5 h-3.5 text-purple-400" />
+                      <span>CRAFTS & SECTORS</span>
+                    </button>
+                  )}
+
+                  {isMultiplayer && onExitRoom && (
+                    <button
+                      id="exit-to-lobby-btn"
+                      onClick={onExitRoom}
+                      className="py-2 px-3 text-xs text-slate-400 hover:text-white transition-colors cursor-pointer border border-slate-800 rounded-lg"
+                    >
+                      EXIT
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Touch Device Tactile Flap Trigger (Only during active flight) */}
+      {gameState === 'playing' && (
+        <button
+          id="mobile-flap-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleFlap();
+          }}
+          onTouchStart={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            handleFlap();
+          }}
+          className="fixed bottom-6 right-6 px-5 py-3.5 bg-gradient-to-r from-cyan-400 to-blue-500 active:scale-90 text-slate-950 font-black rounded-2xl shadow-[0_0_25px_rgba(0,240,255,0.6)] sm:hidden z-20 font-mono tracking-wider flex items-center gap-1.5 border border-cyan-200 cursor-pointer"
+          aria-label="Tap to thrust"
+        >
+          <Zap className="w-4 h-4 fill-current animate-pulse" />
+          <span className="text-xs">THRUST</span>
+        </button>
+      )}
+    </div>
+  );
+}
