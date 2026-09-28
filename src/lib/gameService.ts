@@ -265,7 +265,7 @@ export async function resetLeaderboard(): Promise<{ success: boolean; count: num
  */
 export async function ensureInitialCleanResetOnce(): Promise<void> {
   try {
-    const key = 'flappy_db_scratch_reset_2026';
+    const key = 'flappy_db_reset_v3_clean';
     if (!localStorage.getItem(key)) {
       localStorage.setItem(key, 'true');
       await resetLeaderboard();
@@ -525,11 +525,17 @@ export async function incrementUserWins(uid: string): Promise<void> {
 }
 
 /**
- * Fetches all registered pilots for the leaderboard and merges the current user's profile.
+ * Fetches registered logged-in pilots for the leaderboard and merges the current logged-in user's profile.
  */
 export async function getLeaderboard(currentUserProfile?: UserProfile | null): Promise<LeaderboardEntry[]> {
   const list: LeaderboardEntry[] = [];
   const seenUids = new Set<string>();
+  const activeSession = getActivePilotSession();
+  const currentPilot = currentUserProfile?.isRegisteredPilot
+    ? currentUserProfile
+    : activeSession?.isRegisteredPilot
+    ? activeSession
+    : null;
 
   try {
     const q = query(
@@ -540,7 +546,8 @@ export async function getLeaderboard(currentUserProfile?: UserProfile | null): P
     const snap = await getDocs(q);
     snap.forEach((d) => {
       const data = d.data() as UserProfile;
-      if (data && (data.displayName || data.username || data.email)) {
+      // Only include verified registered/logged-in pilots with non-zero or verified credentials
+      if (data && (data.isRegisteredPilot || data.passwordHash) && (data.displayName || data.username)) {
         const entryUid = data.uid || d.id;
         seenUids.add(entryUid);
         list.push({
@@ -556,23 +563,21 @@ export async function getLeaderboard(currentUserProfile?: UserProfile | null): P
     console.warn('Error getting leaderboard from Firestore:', err);
   }
 
-  // Ensure current pilot is always present in the leaderboard
-  const activeSession = getActivePilotSession();
-  const localProf = currentUserProfile || activeSession || getLocalGuestProfile();
-  if (localProf && localProf.displayName) {
-    const myUid = localProf.uid || activeSession?.uid || auth.currentUser?.uid;
+  // Ensure current logged-in pilot is always present in the leaderboard
+  if (currentPilot && currentPilot.displayName) {
+    const myUid = currentPilot.uid;
     const existingIdx = myUid ? list.findIndex((e) => e.uid === myUid) : -1;
     if (existingIdx >= 0) {
-      list[existingIdx].displayName = localProf.displayName;
-      list[existingIdx].highScore = Math.max(list[existingIdx].highScore, localProf.highScore || 0);
-      if (localProf.photoURL) list[existingIdx].photoURL = localProf.photoURL;
+      list[existingIdx].displayName = currentPilot.displayName;
+      list[existingIdx].highScore = Math.max(list[existingIdx].highScore, currentPilot.highScore || 0);
+      if (currentPilot.photoURL) list[existingIdx].photoURL = currentPilot.photoURL;
     } else if (myUid) {
       list.push({
         uid: myUid,
-        displayName: localProf.displayName,
-        photoURL: localProf.photoURL,
-        highScore: localProf.highScore || 0,
-        multiplayerWins: localProf.multiplayerWins || 0,
+        displayName: currentPilot.displayName,
+        photoURL: currentPilot.photoURL,
+        highScore: currentPilot.highScore || 0,
+        multiplayerWins: currentPilot.multiplayerWins || 0,
       });
     }
   }

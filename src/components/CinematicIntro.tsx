@@ -15,10 +15,8 @@ interface Props {
 
 export function CinematicIntro({ onComplete, onSkip }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const progressBarRef = useRef<HTMLDivElement | null>(null);
   const [act, setAct] = useState<1 | 2 | 3 | 4>(1);
   const [isMuted, setIsMuted] = useState(soundManager.isMuted());
-  const [showContinueBtn, setShowContinueBtn] = useState(false);
 
   // Keep callback refs stable across renders
   const onCompleteRef = useRef(onComplete);
@@ -89,12 +87,6 @@ export function CinematicIntro({ onComplete, onSkip }: Props) {
       lastTime = now;
       st.time += dt;
 
-      // Update progress bar directly via DOM to avoid React re-renders
-      if (progressBarRef.current) {
-        const p = Math.min(100, (st.time / TOTAL_DURATION) * 100);
-        progressBarRef.current.style.width = `${p}%`;
-      }
-
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const width = canvas.width / dpr;
       const height = canvas.height / dpr;
@@ -120,10 +112,6 @@ export function CinematicIntro({ onComplete, onSkip }: Props) {
         newAct = 3;
       } else {
         newAct = 4;
-        if (!st.continueBtnTriggered) {
-          st.continueBtnTriggered = true;
-          setShowContinueBtn(true);
-        }
       }
 
       if (newAct !== st.currentAct) {
@@ -732,30 +720,6 @@ export function CinematicIntro({ onComplete, onSkip }: Props) {
             <SkipForward className="w-3.5 h-3.5 text-amber-400" />
           </button>
         </div>
-      </div>
-
-      {/* Floating Bottom Action Prompt at Act 4 */}
-      {showContinueBtn && (
-        <div className="absolute bottom-8 inset-x-4 flex justify-center z-10 pointer-events-auto animate-in fade-in zoom-in-95 duration-300">
-          <button
-            id="intro-continue-to-menu-btn"
-            onClick={() => onCompleteRef.current(true)}
-            className="py-3.5 px-6 sm:px-8 bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-300 hover:from-amber-400 hover:to-yellow-200 text-slate-950 font-black rounded-2xl uppercase text-xs sm:text-sm tracking-wider transition-all duration-200 shadow-[0_0_35px_rgba(245,158,11,0.6)] flex items-center gap-2.5 cursor-pointer active:scale-95 hover:scale-102"
-          >
-            <Crown className="w-4 h-4 fill-current text-slate-950" />
-            <span>CONTINUE TO INTRO PORTAL</span>
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {/* Minimalist Bottom Timeline Progress Bar */}
-      <div className="absolute bottom-0 inset-x-0 h-1 bg-slate-900 pointer-events-none">
-        <div
-          ref={progressBarRef}
-          className="bg-gradient-to-r from-amber-400 via-cyan-400 to-amber-400 h-full transition-all duration-75 shadow-[0_0_12px_#F59E0B]"
-          style={{ width: '0%' }}
-        />
       </div>
     </div>
   );
