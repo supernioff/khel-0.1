@@ -24,7 +24,10 @@ import { CinematicIntro } from './CinematicIntro';
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onLoginGoogle: () => Promise<boolean>;
+  onLoginGoogle: (
+    useRedirect?: boolean
+  ) => Promise<{ success: boolean; error?: string; code?: string; redirecting?: boolean } | boolean>;
+  onSavePilotCallsign?: (displayName: string, photoURL?: string) => Promise<void>;
   onLogout?: () => void;
   currentUser: User | null;
   profile: UserProfile | null;
@@ -33,10 +36,20 @@ interface Props {
   onSelectCraft?: (craftId: BirdCraftId) => void;
 }
 
+const PILOT_AVATARS = [
+  { id: 'valkyrie', label: 'Valkyrie-01', color: '#00F0FF', icon: '⚡' },
+  { id: 'solaris', label: 'Solar-Pyro', color: '#FF4500', icon: '🔥' },
+  { id: 'shadow', label: 'Void-Nox', color: '#A855F7', icon: '🌑' },
+  { id: 'chrono', label: 'Flora-Bloom', color: '#10B981', icon: '🌿' },
+  { id: 'titan', label: 'Aegis-Guard', color: '#F59E0B', icon: '🛡️' },
+  { id: 'phase', label: 'Mirage-Astra', color: '#00FFA3', icon: '✨' },
+];
+
 export function FuturisticWelcomeWindow({
   isOpen,
   onClose,
   onLoginGoogle,
+  onSavePilotCallsign,
   onLogout,
   currentUser,
   profile,
@@ -49,6 +62,11 @@ export function FuturisticWelcomeWindow({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [justLoggedIn, setJustLoggedIn] = useState(false);
   const [rotationAngle, setRotationAngle] = useState(0);
+  const [showRedirectOption, setShowRedirectOption] = useState(false);
+  const [customCallsign, setCustomCallsign] = useState(profile?.displayName || 'Cadet Pilot');
+  const [selectedAvatarIdx, setSelectedAvatarIdx] = useState(0);
+  const [savingCallsign, setSavingCallsign] = useState(false);
+  const [callsignSaved, setCallsignSaved] = useState(false);
 
   // Sync initial view when modal reopens
   useEffect(() => {
@@ -56,8 +74,12 @@ export function FuturisticWelcomeWindow({
       setPhase(initialView);
       setErrorMsg(null);
       setJustLoggedIn(false);
+      setShowRedirectOption(false);
+      if (profile?.displayName) {
+        setCustomCallsign(profile.displayName);
+      }
     }
-  }, [isOpen, initialView]);
+  }, [isOpen, initialView, profile?.displayName]);
 
   // Procedural rotating telemetry angle
   useEffect(() => {
@@ -72,25 +94,65 @@ export function FuturisticWelcomeWindow({
 
   const isGoogleUser = !!currentUser && !currentUser.isAnonymous;
 
-  const handleSignIn = async () => {
+  const handleSignIn = async (useRedirect = false) => {
     setLoading(true);
     setErrorMsg(null);
     try {
-      const success = await onLoginGoogle();
-      if (success) {
+      const res = await onLoginGoogle(useRedirect);
+      if (typeof res === 'object') {
+        if (res.redirecting) {
+          return;
+        }
+        if (res.success) {
+          setJustLoggedIn(true);
+          setTimeout(() => {
+            setJustLoggedIn(false);
+            onClose();
+          }, 1200);
+        } else {
+          setErrorMsg(res.error || 'Authentication interrupted. Please retry.');
+          if (res.code === 'auth/popup-blocked' || res.code === 'auth/unauthorized-domain') {
+            setShowRedirectOption(true);
+          }
+        }
+      } else if (res === true) {
         setJustLoggedIn(true);
         setTimeout(() => {
           setJustLoggedIn(false);
           onClose();
         }, 1200);
       } else {
-        setErrorMsg('Sign-in cancelled or window closed. Please try again.');
+        setErrorMsg('Google sign-in was closed or blocked. You can also sign in via redirect or set your Callsign directly below!');
+        setShowRedirectOption(true);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Authentication failed';
       setErrorMsg(msg);
+      setShowRedirectOption(true);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveCustomCallsign = async () => {
+    if (!customCallsign.trim()) return;
+    setSavingCallsign(true);
+    try {
+      if (onSavePilotCallsign) {
+        await onSavePilotCallsign(
+          customCallsign.trim(),
+          PILOT_AVATARS[selectedAvatarIdx]?.color
+        );
+      }
+      setCallsignSaved(true);
+      setTimeout(() => {
+        setCallsignSaved(false);
+        onClose();
+      }, 900);
+    } catch (err) {
+      console.warn('Callsign save warning:', err);
+    } finally {
+      setSavingCallsign(false);
     }
   };
 
@@ -467,7 +529,7 @@ export function FuturisticWelcomeWindow({
                 {/* Official Google Login Button */}
                 <button
                   id="welcome-google-auth-btn"
-                  onClick={handleSignIn}
+                  onClick={() => handleSignIn(false)}
                   disabled={loading}
                   className="w-full py-3.5 px-4 bg-white hover:bg-slate-100 text-slate-900 font-black rounded-xl uppercase font-mono text-xs tracking-wider transition-all duration-200 shadow-[0_0_25px_rgba(255,255,255,0.3)] hover:shadow-[0_0_30px_rgba(0,240,255,0.4)] flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed group active:scale-[0.98]"
                 >
@@ -501,6 +563,77 @@ export function FuturisticWelcomeWindow({
                   )}
                 </button>
 
+                {/* Redirect Sign-In Fallback Button (Ideal for mobile Safari / strict popup blockers) */}
+                {showRedirectOption && (
+                  <button
+                    id="welcome-google-redirect-btn"
+                    onClick={() => handleSignIn(true)}
+                    disabled={loading}
+                    className="w-full py-2.5 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-[0_0_15px_rgba(59,130,246,0.3)]"
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span>SIGN IN VIA FULL-PAGE REDIRECT (MOBILE / SAFARI)</span>
+                  </button>
+                )}
+
+                {/* Instant Pilot Callsign & Avatar Creator */}
+                <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-cyan-500/30 space-y-3 text-left">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-cyan-300 flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                      QUICK PILOT IDENTITY & CALLSIGN
+                    </span>
+                    <span className="text-[9px] text-slate-400">INSTANT ACCESS</span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-slate-400 block uppercase">
+                      Enter Callsign Name
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={customCallsign}
+                        onChange={(e) => setCustomCallsign(e.target.value)}
+                        placeholder="e.g. Maverick, StarWing..."
+                        maxLength={18}
+                        className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs font-bold text-white focus:outline-none focus:border-cyan-400 transition-colors"
+                      />
+                      <button
+                        onClick={handleSaveCustomCallsign}
+                        disabled={savingCallsign || !customCallsign.trim()}
+                        className="px-3.5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs transition-all cursor-pointer shadow-[0_0_12px_rgba(0,240,255,0.4)] disabled:opacity-50 shrink-0"
+                      >
+                        {savingCallsign ? 'SAVING...' : callsignSaved ? 'SAVED ✓' : 'SAVE & FLY'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Avatar Badge Selector */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] text-slate-400 block uppercase">
+                      Choose Pilot Insignia
+                    </span>
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                      {PILOT_AVATARS.map((av, idx) => (
+                        <button
+                          key={av.id}
+                          onClick={() => setSelectedAvatarIdx(idx)}
+                          className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-sm transition-all cursor-pointer shrink-0 ${
+                            selectedAvatarIdx === idx
+                              ? 'border-white scale-110 shadow-[0_0_12px_#00F0FF]'
+                              : 'border-slate-700 opacity-60 hover:opacity-100'
+                          }`}
+                          style={{ backgroundColor: av.color }}
+                          title={av.label}
+                        >
+                          {av.icon}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
                 {/* Secondary Option: Guest Bypass */}
                 <div className="pt-1 text-center">
                   <button
@@ -508,9 +641,9 @@ export function FuturisticWelcomeWindow({
                     onClick={handleGuestBypass}
                     className="w-full py-2 px-3 bg-slate-900/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-700 rounded-xl text-[11px] font-mono transition-all cursor-pointer flex items-center justify-center gap-1.5"
                   >
-                    <span>Fly as Unranked Guest</span>
+                    <span>Fly as Cadet Pilot</span>
                     <span className="text-slate-500 text-[10px]">
-                      (Scores saved locally only)
+                      (Scores recorded on local telemetry)
                     </span>
                   </button>
                 </div>

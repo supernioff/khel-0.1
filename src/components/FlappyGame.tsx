@@ -64,7 +64,8 @@ interface Props {
   onOpenThemeWindow?: () => void;
   currentUser?: User | null;
   onOpenAuthModal?: () => void;
-  onLoginGoogle?: () => Promise<boolean>;
+  onLoginGoogle?: (useRedirect?: boolean) => Promise<any>;
+  onSavePilotCallsign?: (displayName: string, photoURL?: string) => Promise<void>;
   isModalOpen?: boolean;
   onOpenCinematic?: () => void;
   isGuestDismissed?: boolean;
@@ -102,6 +103,7 @@ export function FlappyGame({
   currentUser,
   onOpenAuthModal,
   onLoginGoogle,
+  onSavePilotCallsign,
   isModalOpen = false,
   onOpenCinematic,
   isGuestDismissed = false,
@@ -115,6 +117,7 @@ export function FlappyGame({
   const virtualHeightRef = useRef<number>(GAME_HEIGHT);
   const virtualOffsetYRef = useRef<number>(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [sfxMuted, setSfxMuted] = useState(soundManager.isMuted());
   const [musicMuted, setMusicMuted] = useState(soundManager.isMusicMuted());
   const [voiceEnabled, setVoiceEnabled] = useState(soundManager.isVoiceEnabled());
@@ -340,22 +343,71 @@ export function FlappyGame({
     setRaceWinner(null);
   }, []);
 
-  // Fullscreen Handler
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen?.();
-    } else {
-      document.exitFullscreen?.();
+  // Universal Fullscreen Handler (Works reliably across iPhone Safari, Android, iPads, Desktops & iframes)
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      const container = containerRef.current || document.documentElement;
+      const isNativeFs = Boolean(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      );
+
+      if (!isFullscreen && !isNativeFs) {
+        if (container.requestFullscreen) {
+          await container.requestFullscreen().catch(() => {});
+        } else if ((container as any).webkitRequestFullscreen) {
+          (container as any).webkitRequestFullscreen();
+        } else if ((container as any).webkitEnterFullscreen) {
+          (container as any).webkitEnterFullscreen();
+        } else if ((container as any).msRequestFullscreen) {
+          (container as any).msRequestFullscreen();
+        }
+        setIsFullscreen(true);
+      } else {
+        if (isNativeFs) {
+          if (document.exitFullscreen) {
+            await document.exitFullscreen().catch(() => {});
+          } else if ((document as any).webkitExitFullscreen) {
+            (document as any).webkitExitFullscreen();
+          } else if ((document as any).mozCancelFullScreen) {
+            (document as any).mozCancelFullScreen();
+          } else if ((document as any).msExitFullscreen) {
+            (document as any).msExitFullscreen();
+          }
+        }
+        setIsFullscreen(false);
+      }
+    } catch {
+      // Fallback to seamless CSS edge-to-edge fullscreen viewport if native is restricted
+      setIsFullscreen((prev) => !prev);
     }
-  };
+  }, [isFullscreen]);
 
   useEffect(() => {
     const handleFsChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const isNativeFs = Boolean(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      );
+      if (!isNativeFs && isFullscreen) {
+        setIsFullscreen(false);
+      }
     };
     document.addEventListener('fullscreenchange', handleFsChange);
-    return () => document.removeEventListener('fullscreenchange', handleFsChange);
-  }, []);
+    document.addEventListener('webkitfullscreenchange', handleFsChange);
+    document.addEventListener('mozfullscreenchange', handleFsChange);
+    document.addEventListener('MSFullscreenChange', handleFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFsChange);
+      document.removeEventListener('webkitfullscreenchange', handleFsChange);
+      document.removeEventListener('mozfullscreenchange', handleFsChange);
+      document.removeEventListener('MSFullscreenChange', handleFsChange);
+    };
+  }, [isFullscreen]);
 
   // Toggle SFX
   const handleToggleSfx = () => {
@@ -980,10 +1032,11 @@ export function FlappyGame({
             }
           }
 
-          // Ceiling and Floor collision
+          // Ceiling and Floor collision (Adapted to dynamic screen height & virtual offset)
           if (isAlive.current) {
-            if (birdY.current - BIRD_HIT_RADIUS <= 0) {
-              birdY.current = BIRD_HIT_RADIUS;
+            const ceilingLimit = -(virtualOffsetYRef.current || 0);
+            if (birdY.current - BIRD_HIT_RADIUS <= ceilingLimit) {
+              birdY.current = ceilingLimit + BIRD_HIT_RADIUS;
               birdVy.current = 0;
             }
 
@@ -1083,15 +1136,17 @@ export function FlappyGame({
         curTheme
       );
 
-      // Energy Gate Pylons
+      // Energy Gate Pylons (Seamless extension beyond top & bottom screen edges)
+      const topPylonStartY = -curOffsetY - 40;
       pipes.current.forEach((pipe) => {
-        drawCyberGate(ctx, pipe.x, 0, pipe.width, pipe.topHeight, true, curTheme);
+        const topPylonHeight = pipe.topHeight - topPylonStartY;
+        drawCyberGate(ctx, pipe.x, topPylonStartY, pipe.width, topPylonHeight, true, curTheme);
         drawCyberGate(
           ctx,
           pipe.x,
           pipe.bottomY,
           pipe.width,
-          PLAYABLE_HEIGHT - pipe.bottomY,
+          (PLAYABLE_HEIGHT - pipe.bottomY) + curOffsetY + 100,
           false,
           curTheme
         );
@@ -2420,7 +2475,9 @@ export function FlappyGame({
   return (
     <div
       id="flappy-game-wrapper"
-      className="relative w-full h-full flex-1 flex flex-col items-center select-none overflow-hidden"
+      className={`relative w-full h-full flex-1 flex flex-col items-center select-none overflow-hidden ${
+        isFullscreen ? 'fixed inset-0 z-50 w-screen h-[100dvh] max-w-none m-0 p-0 bg-slate-950' : ''
+      }`}
     >
       <div
         id="canvas-container"
@@ -2439,8 +2496,8 @@ export function FlappyGame({
         />
 
         {/* Minimalist Aerospace Top HUD */}
-        <div className="absolute top-2 sm:top-3 inset-x-2 sm:inset-x-4 flex items-center justify-between pointer-events-none z-10 font-mono gap-1 sm:gap-2">
-          {/* Top-Left: Pilot Avatar, Warp Speed, Dynamic Sector, & Flight Mode */}
+        <div className="absolute top-0 inset-x-0 pt-safe px-2 sm:px-4 pt-2 sm:pt-3 flex items-center justify-between pointer-events-none z-10 font-mono gap-1 sm:gap-2">
+          {/* Top-Left: Pilot Avatar, Warp Speed, & Flight Mode */}
           <div className="flex items-center gap-1 sm:gap-1.5 pointer-events-auto min-w-0">
             {/* Pilot Callsign Avatar */}
             {isGoogleUser ? (
@@ -2483,7 +2540,7 @@ export function FlappyGame({
               </button>
             )}
 
-            <div className="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg bg-slate-950/90 border border-cyan-500/40 text-cyan-400 text-[10px] sm:text-xs font-bold flex items-center gap-1 shadow-[0_0_10px_rgba(0,240,255,0.2)] shrink-0">
+            <div className="px-1.5 py-1 sm:px-2.5 sm:py-1.5 rounded-lg bg-slate-950/90 border border-cyan-500/40 text-cyan-400 text-[10px] sm:text-xs font-bold flex items-center gap-1 shadow-[0_0_10px_rgba(0,240,255,0.2)] shrink-0">
               <Zap className="w-3 h-3 text-cyan-400 animate-pulse" />
               <span className="hidden xs:inline">WARP</span>
               <span>{warpSpeed}</span>
@@ -2510,7 +2567,7 @@ export function FlappyGame({
                     e.stopPropagation();
                     onSelectMode('single');
                   }}
-                  className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md text-[10px] sm:text-[11px] font-black transition-all flex items-center gap-1 cursor-pointer ${
+                  className={`px-1.5 py-0.5 sm:px-2.5 sm:py-1 rounded-md text-[10px] sm:text-[11px] font-black transition-all flex items-center gap-1 cursor-pointer ${
                     currentMode === 'single'
                       ? 'bg-cyan-500 text-slate-950 shadow-[0_0_8px_rgba(0,240,255,0.5)]'
                       : 'text-slate-400 hover:text-white'
@@ -2527,7 +2584,7 @@ export function FlappyGame({
                     e.stopPropagation();
                     onSelectMode('multiplayer');
                   }}
-                  className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md text-[10px] sm:text-[11px] font-black transition-all flex items-center gap-1 cursor-pointer ${
+                  className={`px-1.5 py-0.5 sm:px-2.5 sm:py-1 rounded-md text-[10px] sm:text-[11px] font-black transition-all flex items-center gap-1 cursor-pointer ${
                     currentMode === 'multiplayer'
                       ? 'bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-[0_0_8px_rgba(168,85,247,0.5)]'
                       : 'text-slate-400 hover:text-white'
@@ -2542,126 +2599,232 @@ export function FlappyGame({
             )}
           </div>
 
-          {/* Top-Right: Opponent Telemetry, Sound, Origin, Rankings, Themes, Fullscreen */}
-          <div className="flex items-center gap-1 sm:gap-1.5 pointer-events-auto shrink-0">
+          {/* Top-Right: Opponent Telemetry, Universal Fullscreen, and Controls */}
+          <div className="flex items-center gap-1 sm:gap-1.5 pointer-events-auto shrink-0 relative">
             {isMultiplayer && opponent && (
-              <div className={`px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg border text-[10px] sm:text-xs font-bold ${
+              <div className={`px-1.5 py-1 sm:px-2.5 sm:py-1.5 rounded-lg border text-[10px] sm:text-xs font-bold ${
                 opponent.alive
                   ? 'bg-purple-950/90 border-purple-500/40 text-purple-300'
                   : 'bg-red-950/90 border-red-500/50 text-red-300'
               }`}>
-                {opponent.displayName.slice(0, 6)}: {opponent.score}
+                {opponent.displayName.slice(0, 5)}: {opponent.score}
                 <span className="hidden sm:inline">{opponent.alive ? ' pts' : ' (CRASH)'}</span>
               </div>
             )}
 
-            {/* Background Music Toggle */}
-            <button
-              id="hud-music-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleToggleMusic();
-              }}
-              className={`p-1.5 sm:p-2 rounded-lg border transition-all cursor-pointer ${
-                !musicMuted
-                  ? 'bg-purple-950/80 border-purple-400 text-purple-300 shadow-[0_0_10px_rgba(168,85,247,0.3)]'
-                  : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-white'
-              }`}
-              title={!musicMuted ? 'Mute Music' : 'Play Music'}
-              aria-label="Toggle Music"
-            >
-              <Music className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </button>
-
-            {/* Sound FX Toggle */}
-            <button
-              id="hud-mute-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleToggleSfx();
-              }}
-              className={`p-1.5 sm:p-2 rounded-lg border transition-all cursor-pointer ${
-                !sfxMuted
-                  ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300 shadow-[0_0_10px_rgba(0,240,255,0.3)]'
-                  : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-white'
-              }`}
-              title={!sfxMuted ? 'Mute SFX' : 'Unmute SFX'}
-              aria-label="Toggle Sound Effects"
-            >
-              {!sfxMuted ? (
-                <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              ) : (
-                <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              )}
-            </button>
-
-            {/* 2014 Origin Story & Goddess Awakening Cinematic Trigger */}
-            {onOpenCinematic && (
-              <button
-                id="hud-cinematic-intro-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenCinematic();
-                }}
-                className="p-1.5 sm:px-2.5 sm:py-1.5 bg-slate-900/90 hover:bg-slate-800 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-[0_0_10px_rgba(245,158,11,0.2)] hover:border-amber-400 group"
-                title="Watch 2014 Origin & Goddess Awakening Cinematic"
-                aria-label="Origin Story Cinematic"
-              >
-                <Film className="w-3.5 h-3.5 text-amber-400 group-hover:rotate-12 transition-transform" />
-                <span className="hidden lg:inline">2014 ORIGIN</span>
-              </button>
-            )}
-
-            {/* On-Screen Global Pilot Hall of Fame Button */}
-            {onOpenLeaderboard && (
-              <button
-                id="hud-hall-of-fame-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenLeaderboard();
-                }}
-                className="p-1.5 sm:px-2.5 sm:py-1.5 bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-500/50 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-[0_0_12px_rgba(245,158,11,0.25)] hover:border-amber-400 group"
-                title="Global Pilot Hall of Fame"
-                aria-label="Hall of Fame"
-              >
-                <Trophy className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
-                <span className="hidden sm:inline">RANKINGS</span>
-              </button>
-            )}
-
-            {/* Theme & Craft Config Button */}
-            {onOpenThemeWindow && (
-              <button
-                id="hud-theme-system-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenThemeWindow();
-                }}
-                className="p-1.5 sm:px-2.5 sm:py-1.5 bg-slate-950/90 hover:bg-slate-800 text-cyan-400 border border-cyan-500/40 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-[0_0_10px_rgba(0,240,255,0.2)]"
-                title="Craft Fleet & Sector Themes"
-                aria-label="Craft Fleet & Sector Themes"
-              >
-                <Palette className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">CRAFTS</span>
-              </button>
-            )}
-
+            {/* Universal Fullscreen Button - Prominent & accessible on EVERY screen */}
             <button
               id="fullscreen-toggle-btn"
               onClick={(e) => {
                 e.stopPropagation();
                 toggleFullscreen();
               }}
-              title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
-              aria-label={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
-              className="p-1.5 sm:p-2 bg-slate-950/90 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-lg transition-all cursor-pointer"
+              title={isFullscreen ? 'Exit Fullscreen' : 'Enter Universal Fullscreen'}
+              aria-label={isFullscreen ? 'Exit Fullscreen' : 'Enter Universal Fullscreen'}
+              className="p-1.5 sm:p-2 bg-slate-950/90 hover:bg-slate-800 text-cyan-400 border border-cyan-500/50 shadow-[0_0_10px_rgba(0,240,255,0.25)] rounded-lg transition-all cursor-pointer flex items-center gap-1"
             >
               {isFullscreen ? (
                 <Minimize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               ) : (
                 <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               )}
+              <span className="text-[10px] font-bold hidden xs:inline sm:hidden">
+                {isFullscreen ? 'EXIT' : 'FULL'}
+              </span>
             </button>
+
+            {/* Mobile Cockpit Drawer Toggle (< sm screens) */}
+            <div className="relative sm:hidden">
+              <button
+                id="mobile-hud-menu-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowMobileMenu((prev) => !prev);
+                }}
+                className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                  showMobileMenu
+                    ? 'bg-cyan-500 text-slate-950 border-cyan-300 shadow-[0_0_15px_rgba(0,240,255,0.5)]'
+                    : 'bg-slate-950/90 border-slate-700 text-slate-200 hover:text-white'
+                }`}
+                title="Cockpit Quick Actions"
+                aria-label="Cockpit Quick Actions"
+              >
+                <Sliders className="w-3.5 h-3.5" />
+                <span className="text-[9px] font-black tracking-wider">MENU</span>
+              </button>
+
+              {/* Mobile HUD Floating Quick Flyout Menu */}
+              {showMobileMenu && (
+                <div
+                  className="absolute right-0 top-full mt-2 w-52 p-2.5 rounded-2xl bg-slate-950/98 border border-cyan-500/50 shadow-[0_0_30px_rgba(0,240,255,0.35)] backdrop-blur-xl z-30 space-y-1.5 animate-in fade-in slide-in-from-top-2 duration-150"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="px-2 py-1 text-[10px] font-black text-cyan-400 border-b border-cyan-500/30 flex items-center justify-between">
+                    <span>COCKPIT CONTROLS</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                  </div>
+
+                  {onOpenLeaderboard && (
+                    <button
+                      onClick={() => {
+                        setShowMobileMenu(false);
+                        onOpenLeaderboard();
+                      }}
+                      className="w-full px-2.5 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-2 cursor-pointer"
+                    >
+                      <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Pilot Hall of Fame</span>
+                    </button>
+                  )}
+
+                  {onOpenThemeWindow && (
+                    <button
+                      onClick={() => {
+                        setShowMobileMenu(false);
+                        onOpenThemeWindow();
+                      }}
+                      className="w-full px-2.5 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-cyan-300 border border-cyan-500/30 text-xs font-bold flex items-center gap-2 cursor-pointer"
+                    >
+                      <Palette className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Goddesses & Themes</span>
+                    </button>
+                  )}
+
+                  {onOpenCinematic && (
+                    <button
+                      onClick={() => {
+                        setShowMobileMenu(false);
+                        onOpenCinematic();
+                      }}
+                      className="w-full px-2.5 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-purple-300 border border-purple-500/30 text-xs font-bold flex items-center gap-2 cursor-pointer"
+                    >
+                      <Film className="w-3.5 h-3.5 text-purple-400" />
+                      <span>2014 Origin Cinematic</span>
+                    </button>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-slate-800">
+                    <button
+                      onClick={handleToggleMusic}
+                      className={`px-2 py-1.5 rounded-lg text-[10px] font-bold border flex items-center justify-center gap-1 cursor-pointer ${
+                        !musicMuted
+                          ? 'bg-purple-950/80 border-purple-400 text-purple-300'
+                          : 'bg-slate-900 border-slate-800 text-slate-500'
+                      }`}
+                    >
+                      <Music className="w-3 h-3" />
+                      <span>{musicMuted ? 'BGM OFF' : 'BGM ON'}</span>
+                    </button>
+
+                    <button
+                      onClick={handleToggleSfx}
+                      className={`px-2 py-1.5 rounded-lg text-[10px] font-bold border flex items-center justify-center gap-1 cursor-pointer ${
+                        !sfxMuted
+                          ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300'
+                          : 'bg-slate-900 border-slate-800 text-slate-500'
+                      }`}
+                    >
+                      {!sfxMuted ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
+                      <span>{sfxMuted ? 'SFX OFF' : 'SFX ON'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Tablet & Desktop Inline Buttons (hidden on < sm) */}
+            <div className="hidden sm:flex items-center gap-1.5">
+              {/* Background Music Toggle */}
+              <button
+                id="hud-music-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleToggleMusic();
+                }}
+                className={`p-1.5 sm:p-2 rounded-lg border transition-all cursor-pointer ${
+                  !musicMuted
+                    ? 'bg-purple-950/80 border-purple-400 text-purple-300 shadow-[0_0_10px_rgba(168,85,247,0.3)]'
+                    : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-white'
+                }`}
+                title={!musicMuted ? 'Mute Music' : 'Play Music'}
+                aria-label="Toggle Music"
+              >
+                <Music className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              </button>
+
+              {/* Sound FX Toggle */}
+              <button
+                id="hud-mute-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleToggleSfx();
+                }}
+                className={`p-1.5 sm:p-2 rounded-lg border transition-all cursor-pointer ${
+                  !sfxMuted
+                    ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300 shadow-[0_0_10px_rgba(0,240,255,0.3)]'
+                    : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-white'
+                }`}
+                title={!sfxMuted ? 'Mute SFX' : 'Unmute SFX'}
+                aria-label="Toggle Sound Effects"
+              >
+                {!sfxMuted ? (
+                  <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                ) : (
+                  <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                )}
+              </button>
+
+              {/* 2014 Origin Story & Goddess Awakening Cinematic Trigger */}
+              {onOpenCinematic && (
+                <button
+                  id="hud-cinematic-intro-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenCinematic();
+                  }}
+                  className="p-1.5 sm:px-2.5 sm:py-1.5 bg-slate-900/90 hover:bg-slate-800 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-[0_0_10px_rgba(245,158,11,0.2)] hover:border-amber-400 group"
+                  title="Watch 2014 Origin & Goddess Awakening Cinematic"
+                  aria-label="Origin Story Cinematic"
+                >
+                  <Film className="w-3.5 h-3.5 text-amber-400 group-hover:rotate-12 transition-transform" />
+                  <span className="hidden lg:inline">2014 ORIGIN</span>
+                </button>
+              )}
+
+              {/* On-Screen Global Pilot Hall of Fame Button */}
+              {onOpenLeaderboard && (
+                <button
+                  id="hud-hall-of-fame-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenLeaderboard();
+                  }}
+                  className="p-1.5 sm:px-2.5 sm:py-1.5 bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-500/50 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-[0_0_12px_rgba(245,158,11,0.25)] hover:border-amber-400 group"
+                  title="Global Pilot Hall of Fame"
+                  aria-label="Hall of Fame"
+                >
+                  <Trophy className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
+                  <span className="hidden sm:inline">RANKINGS</span>
+                </button>
+              )}
+
+              {/* Theme & Craft Config Button */}
+              {onOpenThemeWindow && (
+                <button
+                  id="hud-theme-system-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenThemeWindow();
+                  }}
+                  className="p-1.5 sm:px-2.5 sm:py-1.5 bg-slate-950/90 hover:bg-slate-800 text-cyan-400 border border-cyan-500/40 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-[0_0_10px_rgba(0,240,255,0.2)]"
+                  title="Craft Fleet & Sector Themes"
+                  aria-label="Craft Fleet & Sector Themes"
+                >
+                  <Palette className="w-3.5 h-3.5" />
+                  <span className="hidden md:inline">CRAFTS</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -2958,11 +3121,21 @@ export function FlappyGame({
                     </button>
                   )}
 
+                  <button
+                    id="gameover-fullscreen-toggle-btn"
+                    onClick={toggleFullscreen}
+                    className="py-2 px-3 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-cyan-400 border border-cyan-500/40 text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                    title={isFullscreen ? 'Exit Fullscreen' : 'Enter Universal Fullscreen'}
+                  >
+                    {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                    <span className="hidden xs:inline">{isFullscreen ? 'EXIT' : 'FULL'}</span>
+                  </button>
+
                   {isMultiplayer && onExitRoom && (
                     <button
                       id="exit-to-lobby-btn"
                       onClick={onExitRoom}
-                      className="py-2 px-3 text-xs text-slate-400 hover:text-white transition-colors cursor-pointer border border-slate-800 rounded-lg"
+                      className="py-2 px-3 text-xs text-slate-400 hover:text-white transition-colors cursor-pointer border border-slate-800 rounded-lg shrink-0"
                     >
                       EXIT
                     </button>

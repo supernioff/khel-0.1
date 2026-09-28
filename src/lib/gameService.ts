@@ -160,6 +160,51 @@ export async function updateUserScore(uid: string, score: number, currentHighSco
 }
 
 /**
+ * Updates a pilot's custom callsign name and avatar photo.
+ * Saves to local persistent profile and syncs to Firestore.
+ */
+export async function updateCustomPilotProfile(
+  profile: UserProfile,
+  displayName: string,
+  photoURL?: string
+): Promise<UserProfile> {
+  const cleanName = displayName.trim() || profile.displayName || 'Cadet Pilot';
+  const updated: UserProfile = {
+    ...profile,
+    displayName: cleanName,
+    photoURL: photoURL !== undefined ? photoURL : profile.photoURL,
+    updatedAt: new Date().toISOString(),
+  };
+
+  saveLocalGuestProfile(updated);
+
+  // Sync to Firestore under user's uid
+  const targetUid = auth.currentUser?.uid || profile.uid;
+  if (targetUid) {
+    try {
+      const userRef = doc(db, 'users', targetUid);
+      await setDoc(
+        userRef,
+        {
+          uid: targetUid,
+          displayName: cleanName,
+          photoURL: updated.photoURL || null,
+          highScore: updated.highScore || 0,
+          multiplayerWins: updated.multiplayerWins || 0,
+          gamesPlayed: updated.gamesPlayed || 0,
+          updatedAt: updated.updatedAt,
+        },
+        { merge: true }
+      );
+    } catch (e) {
+      console.warn('Firestore pilot update error:', e);
+    }
+  }
+
+  return updated;
+}
+
+/**
  * Increments multiplayer race wins for a user.
  */
 export async function incrementUserWins(uid: string): Promise<void> {

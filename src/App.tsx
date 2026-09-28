@@ -8,6 +8,8 @@ import {
   auth,
   googleProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signInAnonymously,
   signOut,
   onAuthStateChanged,
@@ -17,6 +19,7 @@ import {
   getOrCreateUserProfile,
   getLocalGuestProfile,
   subscribeToRoom,
+  updateCustomPilotProfile,
 } from './lib/gameService';
 import { FlappyGame } from './components/FlappyGame';
 import { MultiplayerLobby } from './components/MultiplayerLobby';
@@ -120,6 +123,22 @@ export default function App() {
     };
   }, []);
 
+  // Listen for Google Redirect Sign-In results on return
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then(async (cred) => {
+        if (cred?.user) {
+          setCurrentUser(cred.user);
+          const prof = await getOrCreateUserProfile(cred.user);
+          setProfile(prof);
+          setHasAskedAuthBeforeGame(true);
+        }
+      })
+      .catch((err) => {
+        console.warn('Redirect auth result warning:', err);
+      });
+  }, []);
+
   // Subscribe to real-time room updates if in an active room
   useEffect(() => {
     if (!activeRoom?.id) return;
@@ -145,21 +164,51 @@ export default function App() {
     }
   }, [authLoading, currentUser, hasAskedAuthBeforeGame]);
 
-  // Google Sign-In
-  const handleGoogleLogin = async (): Promise<boolean> => {
+  // Google Sign-In with popup + redirect fallback support & clear error diagnostic
+  const handleGoogleLogin = async (
+    useRedirect = false
+  ): Promise<{ success: boolean; error?: string; code?: string; redirecting?: boolean }> => {
     try {
+      if (useRedirect) {
+        await signInWithRedirect(auth, googleProvider);
+        return { success: false, redirecting: true };
+      }
       const cred = await signInWithPopup(auth, googleProvider);
       if (cred.user) {
         setCurrentUser(cred.user);
         const prof = await getOrCreateUserProfile(cred.user);
         setProfile(prof);
         setHasAskedAuthBeforeGame(true);
-        return true;
+        return { success: true };
       }
-      return false;
+      return { success: false, error: 'Sign-in cancelled or window closed.' };
     } catch (err: unknown) {
-      console.warn('Google sign-in cancelled or failed:', err);
-      return false;
+      console.warn('Google sign-in error:', err);
+      const anyErr = err as { code?: string; message?: string };
+      const code = anyErr?.code || '';
+      let message = anyErr?.message || 'Authentication failed';
+
+      if (code === 'auth/popup-blocked') {
+        message = 'Popup was blocked by your browser. Tap "Sign In With Redirect" or allow popups.';
+      } else if (code === 'auth/unauthorized-domain') {
+        message = 'Firebase domain verification notice. You can instantly register your Pilot Call Sign below!';
+      } else if (code === 'auth/popup-closed-by-user') {
+        message = 'The Google sign-in window was closed before completion.';
+      } else if (code === 'auth/cancelled-popup-request') {
+        message = 'Another sign-in request is already in progress.';
+      }
+      return { success: false, error: message, code };
+    }
+  };
+
+  // Direct Pilot Callsign & Avatar registration (for users who prefer direct identity or when OAuth popup is restricted)
+  const handleSavePilotCallsign = async (displayName: string, photoURL?: string) => {
+    if (!profile) return;
+    try {
+      const updated = await updateCustomPilotProfile(profile, displayName, photoURL);
+      setProfile(updated);
+    } catch (err) {
+      console.warn('Failed to update pilot callsign:', err);
     }
   };
 
@@ -208,6 +257,7 @@ export default function App() {
                 setShowAuthModal(true);
               }}
               onLoginGoogle={handleGoogleLogin}
+              onSavePilotCallsign={handleSavePilotCallsign}
               isModalOpen={isModalOpen}
               onOpenCinematic={() => {
                 setWelcomeInitialView('cinematic');
@@ -352,6 +402,7 @@ export default function App() {
           setIsGuestDismissed(true);
         }}
         onLoginGoogle={handleGoogleLogin}
+        onSavePilotCallsign={handleSavePilotCallsign}
         onLogout={handleLogout}
         currentUser={currentUser}
         profile={profile}
