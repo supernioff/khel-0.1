@@ -23,6 +23,7 @@ import {
   Gamepad2,
   Users,
   UserPlus,
+  LogOut,
 } from 'lucide-react';
 import { soundManager } from '../lib/audio';
 import {
@@ -72,6 +73,7 @@ interface Props {
   onDismissGuestClearance?: () => void;
   currentMode?: 'single' | 'multiplayer';
   onSelectMode?: (mode: 'single' | 'multiplayer') => void;
+  onLogout?: () => void;
 }
 
 // Game Physics Constants (Full-Screen Virtual Space)
@@ -109,6 +111,7 @@ export function FlappyGame({
   onDismissGuestClearance,
   currentMode = 'single',
   onSelectMode,
+  onLogout,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -2894,9 +2897,16 @@ export function FlappyGame({
               </div>
 
               {isGoogleUser ? (
-                <div className="flex items-center justify-between bg-slate-900/80 p-2.5 rounded-xl border border-cyan-500/30">
+                <div className="flex items-center justify-between bg-slate-900/80 p-2.5 rounded-xl border border-cyan-500/30 gap-2">
                   <div className="flex items-center gap-2.5 min-w-0">
-                    {userProfile.photoURL ? (
+                    {userProfile.photoURL && userProfile.photoURL.startsWith('#') ? (
+                      <div
+                        className="w-8 h-8 rounded-full border border-white flex items-center justify-center font-black text-xs text-slate-950 shrink-0"
+                        style={{ backgroundColor: userProfile.photoURL }}
+                      >
+                        {userProfile.displayName.charAt(0).toUpperCase()}
+                      </div>
+                    ) : userProfile.photoURL && userProfile.photoURL.startsWith('http') ? (
                       <img
                         src={userProfile.photoURL}
                         alt={userProfile.displayName}
@@ -2908,17 +2918,35 @@ export function FlappyGame({
                       </div>
                     )}
                     <div className="min-w-0">
-                      <p className="text-xs font-bold text-white truncate">
-                        PILOT: {userProfile.displayName}
+                      <p className="text-xs font-bold text-white truncate flex items-center gap-1">
+                        <span>PILOT: {userProfile.displayName}</span>
+                        <ShieldCheck className="w-3 h-3 text-emerald-400 shrink-0" />
                       </p>
                       <p className="text-[10px] text-emerald-400 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> Callsign connected to Global Leaderboard
+                        <CheckCircle2 className="w-3 h-3 shrink-0" /> Leaderboard connected
                       </p>
                     </div>
                   </div>
-                  <div className="text-right shrink-0 pl-2">
-                    <span className="text-[10px] text-slate-400 block">BEST</span>
-                    <span className="text-xs font-black text-amber-400">{highScore} pts</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="text-right">
+                      <span className="text-[9px] text-slate-400 block font-mono">BEST</span>
+                      <span className="text-xs font-black text-amber-400 font-mono">{highScore} pts</span>
+                    </div>
+                    {onLogout && (
+                      <button
+                        id="preflight-logout-btn"
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onLogout();
+                        }}
+                        className="px-2 py-1.5 rounded-lg bg-slate-950 hover:bg-rose-950 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-500/50 text-[10px] font-mono font-bold transition-all cursor-pointer flex items-center gap-1 active:scale-95"
+                        title="Sign Out of Callsign"
+                      >
+                        <LogOut className="w-3 h-3" />
+                        <span>LOGOUT</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               ) : (

@@ -162,9 +162,9 @@ export default function App() {
 
   // Sign out (reverts smoothly to local guest pilot)
   const handleLogout = () => {
-    clearActivePilotSession();
-    const guest = getLocalGuestProfile();
+    const guest = clearActivePilotSession();
     setProfile(guest);
+    setIsGuestDismissed(true);
   };
 
   const handleUpdateProfile = (updated: Partial<UserProfile>) => {
@@ -212,6 +212,7 @@ export default function App() {
                 setMode(m);
                 if (m === 'single') setActiveRoom(null);
               }}
+              onLogout={handleLogout}
             />
           )
         ) : (
@@ -315,6 +316,7 @@ export default function App() {
                     setMode(m);
                     if (m === 'single') setActiveRoom(null);
                   }}
+                  onLogout={handleLogout}
                 />
               )}
             </>

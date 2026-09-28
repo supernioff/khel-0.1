@@ -70,14 +70,33 @@ export function saveActivePilotSession(profile: UserProfile): void {
 }
 
 /**
- * Clears the active pilot session on logout.
+ * Clears the active pilot session and resets guest storage to a fresh Cadet profile on logout.
  */
-export function clearActivePilotSession(): void {
+export function clearActivePilotSession(): UserProfile {
   try {
     localStorage.removeItem(ACTIVE_PILOT_SESSION_KEY);
   } catch (e) {
     console.warn('Error clearing active pilot session:', e);
   }
+
+  const guestUid = 'cadet_' + Math.random().toString(36).substring(2, 10);
+  const freshCadet: UserProfile = {
+    uid: guestUid,
+    displayName: 'Cadet Pilot',
+    highScore: 0,
+    multiplayerWins: 0,
+    gamesPlayed: 0,
+    isRegisteredPilot: false,
+    updatedAt: new Date().toISOString(),
+  };
+
+  try {
+    localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(freshCadet));
+  } catch (e) {
+    console.warn('Error saving fresh cadet profile:', e);
+  }
+
+  return freshCadet;
 }
 
 /**

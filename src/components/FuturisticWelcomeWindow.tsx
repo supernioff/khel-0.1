@@ -69,6 +69,7 @@ export function FuturisticWelcomeWindow({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<'EXISTS' | 'NOT_FOUND' | 'WRONG_PASSWORD' | null>(null);
   const [justLoggedIn, setJustLoggedIn] = useState(false);
+  const [logoutSuccess, setLogoutSuccess] = useState(false);
   const [rotationAngle, setRotationAngle] = useState(0);
 
   // Sync initial view when modal reopens
@@ -78,11 +79,28 @@ export function FuturisticWelcomeWindow({
       setErrorMsg(null);
       setErrorCode(null);
       setJustLoggedIn(false);
+      setLogoutSuccess(false);
       if (profile?.isRegisteredPilot && profile.displayName) {
         setUsername(profile.displayName);
+      } else {
+        setUsername('');
+        setPassword('');
       }
     }
   }, [isOpen, initialView, profile?.displayName, profile?.isRegisteredPilot]);
+
+  const handleLogoutClick = () => {
+    if (onLogout) {
+      onLogout();
+    }
+    setUsername('');
+    setPassword('');
+    setErrorMsg(null);
+    setErrorCode(null);
+    setJustLoggedIn(false);
+    setLogoutSuccess(true);
+    setAuthMode('signin');
+  };
 
   // Rotating telemetry radar effect
   useEffect(() => {
@@ -264,6 +282,18 @@ export function FuturisticWelcomeWindow({
           /* PHASE 2: PILOT USERNAME & PASSWORD AUTHENTICATION */
           <div className="p-5 sm:p-6 space-y-4 font-mono overflow-y-auto">
             {/* Feedback Banners */}
+            {logoutSuccess && (
+              <div className="p-3 rounded-2xl bg-amber-950/80 border border-amber-400 text-amber-200 text-xs flex items-center gap-2.5 shadow-[0_0_20px_rgba(245,158,11,0.3)] animate-in fade-in">
+                <CheckCircle2 className="w-5 h-5 text-amber-400 shrink-0" />
+                <div>
+                  <p className="font-black text-amber-300">LOGGED OUT SUCCESSFULLY</p>
+                  <p className="text-[11px] text-amber-200/90">
+                    Callsign deactivated. Telemetry reverted to Cadet (Guest) flight mode.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {justLoggedIn && (
               <div className="p-3 rounded-2xl bg-cyan-950/80 border border-cyan-400 text-cyan-200 text-xs flex items-center gap-2.5 shadow-[0_0_20px_rgba(0,240,255,0.3)]">
                 <CheckCircle2 className="w-5 h-5 text-cyan-400 shrink-0 animate-bounce" />
@@ -371,12 +401,13 @@ export function FuturisticWelcomeWindow({
                   {onLogout && (
                     <button
                       id="welcome-signout-btn"
-                      onClick={onLogout}
-                      className="py-3 px-3.5 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700 rounded-xl text-xs transition-all cursor-pointer flex items-center gap-1"
+                      type="button"
+                      onClick={handleLogoutClick}
+                      className="py-3 px-3.5 bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-500/50 rounded-xl text-xs transition-all cursor-pointer flex items-center gap-1 active:scale-95"
                       title="Sign Out of Callsign"
                     >
                       <LogOut className="w-3.5 h-3.5" />
-                      <span className="text-[10px]">LOGOUT</span>
+                      <span className="text-[10px] font-bold">LOGOUT</span>
                     </button>
                   )}
                 </div>
