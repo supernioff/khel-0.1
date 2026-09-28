@@ -242,6 +242,21 @@ export async function resetLeaderboard(): Promise<{ success: boolean; count: num
 }
 
 /**
+ * Performs a one-time clean reset of the leaderboard for the fresh start.
+ */
+export async function ensureInitialCleanResetOnce(): Promise<void> {
+  try {
+    const key = 'flappy_db_scratch_reset_2026';
+    if (!localStorage.getItem(key)) {
+      localStorage.setItem(key, 'true');
+      await resetLeaderboard();
+    }
+  } catch (e) {
+    console.warn('Initial reset check:', e);
+  }
+}
+
+/**
  * Retrieves or creates a persistent local guest profile.
  * Ensures the user can immediately play single-player with full local stats.
  */

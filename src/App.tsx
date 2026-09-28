@@ -18,6 +18,7 @@ import {
   loginPilotAccount,
   subscribeToRoom,
   updateCustomPilotProfile,
+  ensureInitialCleanResetOnce,
 } from './lib/gameService';
 import { FlappyGame } from './components/FlappyGame';
 import { MultiplayerLobby } from './components/MultiplayerLobby';
@@ -76,8 +77,9 @@ export default function App() {
     }
   };
 
-  // Check URL params for room code on initial mount
+  // Check URL params for room code on initial mount and run one-time database scratch reset
   useEffect(() => {
+    ensureInitialCleanResetOnce();
     const params = new URLSearchParams(window.location.search);
     if (params.get('room')) {
       setMode('multiplayer');
