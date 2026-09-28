@@ -1,11 +1,15 @@
 export interface UserProfile {
   uid: string;
+  username?: string;
   displayName: string;
+  passwordHash?: string;
   email?: string;
   photoURL?: string;
   highScore: number;
   multiplayerWins: number;
   gamesPlayed: number;
+  isRegisteredPilot?: boolean;
+  createdAt?: string;
   updatedAt?: string;
 }
 

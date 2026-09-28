@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   ShieldCheck,
   X,
@@ -9,27 +9,31 @@ import {
   AlertCircle,
   LogIn,
   LogOut,
-  Radio,
   ChevronRight,
-  Compass,
-  Cpu,
-  RotateCw,
+  UserPlus,
+  Eye,
+  EyeOff,
   Film,
-  Crown,
+  Lock,
+  User,
+  KeyRound,
 } from 'lucide-react';
-import type { User } from 'firebase/auth';
 import type { UserProfile, BirdCraftId } from '../types/game';
 import { CinematicIntro } from './CinematicIntro';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onLoginGoogle: (
-    useRedirect?: boolean
-  ) => Promise<{ success: boolean; error?: string; code?: string; redirecting?: boolean } | boolean>;
-  onSavePilotCallsign?: (displayName: string, photoURL?: string) => Promise<void>;
+  onRegisterPilot: (
+    username: string,
+    password: string,
+    avatarColor?: string
+  ) => Promise<{ success: boolean; error?: string; code?: 'EXISTS' | 'INVALID' }>;
+  onLoginPilot: (
+    username: string,
+    password: string
+  ) => Promise<{ success: boolean; error?: string; code?: 'NOT_FOUND' | 'WRONG_PASSWORD' }>;
   onLogout?: () => void;
-  currentUser: User | null;
   profile: UserProfile | null;
   onContinueAsGuest?: () => void;
   initialView?: 'cinematic' | 'intro' | 'auth';
@@ -48,40 +52,39 @@ const PILOT_AVATARS = [
 export function FuturisticWelcomeWindow({
   isOpen,
   onClose,
-  onLoginGoogle,
-  onSavePilotCallsign,
+  onRegisterPilot,
+  onLoginPilot,
   onLogout,
-  currentUser,
   profile,
   onContinueAsGuest,
   initialView = 'cinematic',
-  onSelectCraft,
 }: Props) {
   const [phase, setPhase] = useState<'cinematic' | 'intro' | 'auth'>(initialView);
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signup');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [selectedAvatarIdx, setSelectedAvatarIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<'EXISTS' | 'NOT_FOUND' | 'WRONG_PASSWORD' | null>(null);
   const [justLoggedIn, setJustLoggedIn] = useState(false);
   const [rotationAngle, setRotationAngle] = useState(0);
-  const [showRedirectOption, setShowRedirectOption] = useState(false);
-  const [customCallsign, setCustomCallsign] = useState(profile?.displayName || 'Cadet Pilot');
-  const [selectedAvatarIdx, setSelectedAvatarIdx] = useState(0);
-  const [savingCallsign, setSavingCallsign] = useState(false);
-  const [callsignSaved, setCallsignSaved] = useState(false);
 
   // Sync initial view when modal reopens
   useEffect(() => {
     if (isOpen) {
       setPhase(initialView);
       setErrorMsg(null);
+      setErrorCode(null);
       setJustLoggedIn(false);
-      setShowRedirectOption(false);
-      if (profile?.displayName) {
-        setCustomCallsign(profile.displayName);
+      if (profile?.isRegisteredPilot && profile.displayName) {
+        setUsername(profile.displayName);
       }
     }
-  }, [isOpen, initialView, profile?.displayName]);
+  }, [isOpen, initialView, profile?.displayName, profile?.isRegisteredPilot]);
 
-  // Procedural rotating telemetry angle
+  // Rotating telemetry radar effect
   useEffect(() => {
     if (!isOpen) return;
     const interval = setInterval(() => {
@@ -92,264 +95,144 @@ export function FuturisticWelcomeWindow({
 
   if (!isOpen) return null;
 
-  const isGoogleUser = !!currentUser && !currentUser.isAnonymous;
+  const isRegistered = Boolean(profile?.isRegisteredPilot);
 
-  const handleSignIn = async (useRedirect = false) => {
-    setLoading(true);
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setErrorMsg(null);
+    setErrorCode(null);
+
+    const cleanUser = username.trim();
+    if (!cleanUser) {
+      setErrorMsg('Please enter your Pilot Callsign.');
+      return;
+    }
+    if (!password) {
+      setErrorMsg('Please enter your password.');
+      return;
+    }
+
+    setLoading(true);
     try {
-      const res = await onLoginGoogle(useRedirect);
-      if (typeof res === 'object') {
-        if (res.redirecting) {
-          return;
-        }
+      if (authMode === 'signup') {
+        const avatarColor = PILOT_AVATARS[selectedAvatarIdx]?.color || '#00F0FF';
+        const res = await onRegisterPilot(cleanUser, password, avatarColor);
         if (res.success) {
           setJustLoggedIn(true);
           setTimeout(() => {
             setJustLoggedIn(false);
             onClose();
-          }, 1200);
+          }, 900);
         } else {
-          setErrorMsg(res.error || 'Authentication interrupted. Please retry.');
-          if (res.code === 'auth/popup-blocked' || res.code === 'auth/unauthorized-domain') {
-            setShowRedirectOption(true);
+          setErrorMsg(res.error || 'Registration failed.');
+          if (res.code === 'EXISTS') {
+            setErrorCode('EXISTS');
           }
         }
-      } else if (res === true) {
-        setJustLoggedIn(true);
-        setTimeout(() => {
-          setJustLoggedIn(false);
-          onClose();
-        }, 1200);
       } else {
-        setErrorMsg('Google sign-in was closed or blocked. You can also sign in via redirect or set your Callsign directly below!');
-        setShowRedirectOption(true);
+        const res = await onLoginPilot(cleanUser, password);
+        if (res.success) {
+          setJustLoggedIn(true);
+          setTimeout(() => {
+            setJustLoggedIn(false);
+            onClose();
+          }, 900);
+        } else {
+          setErrorMsg(res.error || 'Sign in failed.');
+          if (res.code === 'NOT_FOUND') {
+            setErrorCode('NOT_FOUND');
+          } else if (res.code === 'WRONG_PASSWORD') {
+            setErrorCode('WRONG_PASSWORD');
+          }
+        }
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Authentication failed';
       setErrorMsg(msg);
-      setShowRedirectOption(true);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleSaveCustomCallsign = async () => {
-    if (!customCallsign.trim()) return;
-    setSavingCallsign(true);
-    try {
-      if (onSavePilotCallsign) {
-        await onSavePilotCallsign(
-          customCallsign.trim(),
-          PILOT_AVATARS[selectedAvatarIdx]?.color
-        );
-      }
-      setCallsignSaved(true);
-      setTimeout(() => {
-        setCallsignSaved(false);
-        onClose();
-      }, 900);
-    } catch (err) {
-      console.warn('Callsign save warning:', err);
-    } finally {
-      setSavingCallsign(false);
     }
   };
 
   const handleGuestBypass = () => {
     if (onContinueAsGuest) {
       onContinueAsGuest();
+    } else {
+      onClose();
     }
-    onClose();
   };
-
-  if (phase === 'cinematic') {
-    return (
-      <CinematicIntro
-        onComplete={(unlockedGoddess) => {
-          if (unlockedGoddess && onSelectCraft) {
-            onSelectCraft('goddess');
-          }
-          setPhase('intro');
-        }}
-        onSkip={() => setPhase('intro')}
-      />
-    );
-  }
 
   return (
     <div
-      id="welcome-window-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/90 backdrop-blur-xl animate-in fade-in duration-300"
-      onClick={(e) => {
-        // Prevent background clicks from starting game
-        e.stopPropagation();
-      }}
+      id="futuristic-welcome-backdrop"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md animate-in fade-in duration-300"
+      onClick={handleGuestBypass}
     >
-      {/* Background Animated Cyber Mesh */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-30">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-gradient-to-tr from-cyan-500/10 via-purple-500/10 to-amber-500/5 rounded-full blur-3xl" />
-        <div className="absolute inset-0 bg-[radial-gradient(#00f0ff_1px,transparent_1px)] [background-size:24px_24px] opacity-20" />
-      </div>
-
       <div
-        id="welcome-window-container"
-        className="w-full max-w-lg bg-slate-950/98 rounded-3xl shadow-[0_0_80px_rgba(0,240,255,0.3)] border-2 border-cyan-500/40 text-slate-100 overflow-hidden flex flex-col relative z-10 transition-all duration-500 max-h-[92vh]"
+        id="futuristic-welcome-modal"
+        className="w-full max-w-lg bg-slate-950/95 rounded-3xl shadow-[0_0_60px_rgba(0,240,255,0.3)] border-2 border-cyan-500/40 text-slate-100 overflow-hidden flex flex-col max-h-[92vh] transition-all relative"
         onClick={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        onTouchEnd={(e) => e.stopPropagation()}
       >
-        {/* Top Control Bar */}
-        <div className="px-5 py-3.5 bg-gradient-to-r from-slate-900 via-cyan-950/60 to-slate-900 border-b border-cyan-500/30 flex items-center justify-between shrink-0 font-mono">
-          <div className="flex items-center gap-2.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
-            <span className="text-xs font-black tracking-widest text-cyan-300 uppercase">
-              {phase === 'intro' ? 'CYBER SYSTEM BOOT // v4.2' : 'PRE-FLIGHT PILOT CLEARANCE'}
+        {/* Futuristic Cyber Top Bar */}
+        <div className="bg-gradient-to-r from-slate-900 via-cyan-950/50 to-slate-900 px-5 py-3 border-b border-cyan-500/30 flex items-center justify-between shrink-0 font-mono text-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping shadow-[0_0_10px_#00F0FF]" />
+            <span className="font-bold text-cyan-300 tracking-wider">
+              QUANTUM COCKPIT TERMINAL
+            </span>
+            <span className="text-[10px] text-slate-500 hidden sm:inline-block">
+              // SEC-2099
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setPhase('cinematic')}
-              className="px-2.5 py-1 rounded-lg bg-amber-950/80 hover:bg-amber-900/90 text-[10px] text-amber-300 border border-amber-500/40 transition-all cursor-pointer flex items-center gap-1 font-bold"
-              title="Watch 2014 Origin & Goddess Awakening Cinematic"
-            >
-              <Film className="w-3 h-3 text-amber-400" />
-              <span>ORIGIN STORY</span>
-            </button>
-
-            {phase === 'auth' && (
-              <button
-                onClick={() => setPhase('intro')}
-                className="px-2 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-[10px] text-cyan-400 border border-cyan-500/30 transition-all cursor-pointer"
-              >
-                ◀ INTRO
-              </button>
-            )}
-            <button
-              id="welcome-modal-close-btn"
-              onClick={handleGuestBypass}
-              className="p-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 transition-all cursor-pointer"
-              aria-label="Close"
-              title="Close & Enter Cockpit"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+          <button
+            id="close-welcome-modal-btn"
+            onClick={handleGuestBypass}
+            className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 hover:border-cyan-500/40 transition-all cursor-pointer"
+            aria-label="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
-        {/* PHASE 1: FUTURISTIC INTRO WITH ROTATING RINGS & KINETIC GAME TITLE */}
-        {phase === 'intro' ? (
-          <div className="p-6 sm:p-8 flex flex-col items-center justify-center text-center space-y-6 font-mono overflow-y-auto">
-            {/* The Spectacular Rounding Concentric Cyber Rings */}
-            <div className="relative w-56 h-56 sm:w-64 sm:h-64 flex items-center justify-center my-2 shrink-0">
-              {/* Outer Ring 1: Clockwise Dashed Compass Ring */}
+        {/* Dynamic Phase Content */}
+        {phase === 'cinematic' ? (
+          /* PHASE 0: 2014 ORIGIN STORY CINEMATIC */
+          <div className="p-4 sm:p-6 overflow-y-auto">
+            <CinematicIntro
+              onComplete={() => setPhase('auth')}
+              onSkip={() => setPhase('auth')}
+            />
+          </div>
+        ) : phase === 'intro' ? (
+          /* PHASE 1: GAME INTRO & OVERVIEW */
+          <div className="p-6 text-center space-y-5 font-mono overflow-y-auto flex flex-col items-center">
+            {/* Holographic Radar Visualizer */}
+            <div className="relative w-36 h-36 mx-auto flex items-center justify-center">
               <div
-                className="absolute inset-0 rounded-full border-2 border-dashed border-cyan-500/40"
-                style={{
-                  transform: `rotate(${rotationAngle}deg)`,
-                  boxShadow: '0 0 25px rgba(0, 240, 255, 0.25)',
-                }}
-              >
-                {/* Orbital Corner Tick Markers */}
-                <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-cyan-400 shadow-[0_0_12px_#00F0FF]" />
-                <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-purple-400" />
-                <div className="absolute top-1/2 -left-1.5 -translate-y-1/2 w-2 h-2 rounded-full bg-amber-400" />
-                <div className="absolute top-1/2 -right-1.5 -translate-y-1/2 w-2 h-2 rounded-full bg-cyan-400" />
-              </div>
-
-              {/* Middle Ring 2: Counter-Clockwise Neon Pulse Ring */}
-              <div
-                className="absolute inset-5 sm:inset-6 rounded-full border-2 border-t-purple-400 border-r-transparent border-b-cyan-400 border-l-transparent animate-spin"
-                style={{
-                  animationDuration: '6s',
-                  animationDirection: 'reverse',
-                  boxShadow: 'inset 0 0 20px rgba(168, 85, 247, 0.2)',
-                }}
+                className="absolute inset-0 rounded-full border border-cyan-500/30 animate-spin"
+                style={{ animationDuration: '15s' }}
               />
-
-              {/* Inner Ring 3: Fast Revolving Quantum Accelerator */}
               <div
-                className="absolute inset-11 sm:inset-12 rounded-full border border-dotted border-cyan-300/60 animate-spin"
-                style={{ animationDuration: '4s' }}
+                className="absolute inset-2 rounded-full border border-purple-500/30 animate-spin"
+                style={{ animationDuration: '8s', animationDirection: 'reverse' }}
               />
-
-              {/* Core Reactor: Holographic Cyber Bird Emblem */}
-              <div className="relative w-24 h-24 rounded-full bg-gradient-to-tr from-cyan-950 via-slate-900 to-purple-950 border-2 border-cyan-400 shadow-[0_0_35px_rgba(0,240,255,0.6)] flex flex-col items-center justify-center p-3 animate-pulse">
-                <svg viewBox="0 0 40 40" className="w-12 h-12 drop-shadow-[0_0_10px_#00F0FF]">
-                  {/* Cyber Bird Silhouette */}
-                  <path
-                    d="M6 20 C10 14, 18 10, 26 12 C32 14, 38 18, 38 20 C38 22, 30 26, 22 26 C16 26, 10 24, 6 20 Z"
-                    fill="#00F0FF"
-                    opacity="0.85"
-                  />
-                  <polygon points="14,14 26,8 24,18 12,22" fill="#38BDF8" />
-                  <ellipse cx="28" cy="18" rx="3.5" ry="2" fill="#FFFFFF" />
-                  <path d="M4 20 L-2 18 L-2 22 Z" fill="#F43F5E" />
-                </svg>
-                <span className="text-[9px] font-black tracking-widest text-cyan-300 mt-1 uppercase">
-                  WARP CORE
-                </span>
-              </div>
-
-              {/* Floating Orbiting HUD Badges */}
-              <div
-                className="absolute text-[10px] tracking-widest font-black text-cyan-400 bg-slate-950/90 border border-cyan-500/50 px-2.5 py-0.5 rounded-full shadow-[0_0_12px_rgba(0,240,255,0.3)] transition-all"
-                style={{
-                  top: '6%',
-                  left: '50%',
-                  transform: `translateX(-50%) rotate(${-rotationAngle * 0.4}deg)`,
-                }}
-              >
-                // ORBIT 2099
-              </div>
-
-              <div
-                className="absolute text-[9px] tracking-wider font-bold text-amber-300 bg-slate-950/90 border border-amber-500/50 px-2 py-0.5 rounded-full shadow-[0_0_12px_rgba(245,158,11,0.3)] transition-all"
-                style={{
-                  bottom: '6%',
-                  left: '50%',
-                  transform: `translateX(-50%) rotate(${rotationAngle * 0.4}deg)`,
-                }}
-              >
-                HALL OF FAME LINK
+              <div className="relative w-24 h-24 rounded-2xl bg-gradient-to-tr from-cyan-900/60 to-purple-900/60 border-2 border-cyan-400 flex items-center justify-center shadow-[0_0_30px_rgba(0,240,255,0.4)]">
+                <span className="text-4xl">⚡</span>
               </div>
             </div>
 
-            {/* Kinetic Game Title Presentation */}
             <div className="space-y-2">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 text-xs font-bold shadow-[0_0_15px_rgba(0,240,255,0.2)]">
-                <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-spin" />
-                <span>CYBERNETIC AEROSPACE WARP</span>
-              </div>
-
               <h1 className="text-3xl sm:text-4xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-white to-purple-400 uppercase drop-shadow-[0_0_25px_rgba(0,240,255,0.5)]">
                 CYBER FLAP 2099
               </h1>
-
               <p className="text-xs text-slate-300 max-w-sm mx-auto font-medium leading-relaxed">
-                Step into the high-velocity cyber corridor. Master supersonic warp gates, pilot legendary mechanical crafts, and claim sector supremacy on the global leaderboard.
+                Step into the high-velocity cyber corridor. Register your Pilot Callsign, master supersonic warp gates, and claim sector supremacy on the global leaderboard.
               </p>
             </div>
 
-            {/* Live Systems Telemetry Grid */}
-            <div className="grid grid-cols-2 gap-2 w-full max-w-sm text-left text-[11px]">
-              <div className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800 flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
-                <div className="truncate">
-                  <span className="text-slate-400 block text-[9px]">WARP PROPULSION</span>
-                  <span className="text-emerald-400 font-bold">100% ONLINE</span>
-                </div>
-              </div>
-
-              <div className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800 flex items-center gap-2">
-                <Trophy className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <div className="truncate">
-                  <span className="text-slate-400 block text-[9px]">SECTOR LEADERBOARD</span>
-                  <span className="text-amber-300 font-bold">LIVE SYNCED</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Transition Action to Pilot Authentication */}
             <div className="w-full max-w-sm space-y-2 pt-2">
               <button
                 id="welcome-advance-btn"
@@ -357,84 +240,111 @@ export function FuturisticWelcomeWindow({
                 className="w-full py-3.5 px-4 bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-slate-950 font-black rounded-xl uppercase text-xs tracking-wider transition-all duration-200 shadow-[0_0_30px_rgba(0,240,255,0.4)] flex items-center justify-center gap-2 cursor-pointer active:scale-98"
               >
                 <Zap className="w-4 h-4 fill-current text-slate-950" />
-                <span>INITIALIZE PILOT CLEARANCE</span>
+                <span>PILOT SIGN IN / SIGN UP</span>
                 <ChevronRight className="w-4 h-4" />
               </button>
 
               <button
-                id="play-cinematic-btn"
                 onClick={() => setPhase('cinematic')}
                 className="w-full py-2.5 px-3 bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-[0_0_15px_rgba(245,158,11,0.2)]"
               >
                 <Film className="w-4 h-4 text-amber-400" />
-                <span>REPLAY 2014 ORIGIN & GODDESS CINEMATIC</span>
+                <span>REPLAY 2014 ORIGIN CINEMATIC</span>
               </button>
 
               <button
                 onClick={handleGuestBypass}
                 className="w-full py-2 text-slate-400 hover:text-slate-200 text-[11px] font-mono transition-colors cursor-pointer"
               >
-                Skip straight to offline cockpit &gt;
+                Fly as Cadet (Guest) &gt;
               </button>
             </div>
           </div>
         ) : (
-          /* PHASE 2: GOOGLE PILOT CLEARANCE ("where you ask gmail and all like you do now") */
-          <div className="p-6 space-y-5 font-mono overflow-y-auto">
+          /* PHASE 2: PILOT USERNAME & PASSWORD AUTHENTICATION */
+          <div className="p-5 sm:p-6 space-y-4 font-mono overflow-y-auto">
             {/* Feedback Banners */}
             {justLoggedIn && (
               <div className="p-3 rounded-2xl bg-cyan-950/80 border border-cyan-400 text-cyan-200 text-xs flex items-center gap-2.5 shadow-[0_0_20px_rgba(0,240,255,0.3)]">
                 <CheckCircle2 className="w-5 h-5 text-cyan-400 shrink-0 animate-bounce" />
                 <div>
-                  <p className="font-black text-cyan-300">CALLSIGN VERIFIED!</p>
+                  <p className="font-black text-cyan-300">CALLSIGN CLEARED & LOGGED IN!</p>
                   <p className="text-[11px] text-cyan-200/80">
-                    Telemetry link active. Your high scores will stream to the Global Hall of Fame!
+                    Welcome back, Pilot. Your telemetry is actively streaming to the Global Leaderboard.
                   </p>
                 </div>
               </div>
             )}
 
             {errorMsg && (
-              <div className="p-3 rounded-2xl bg-red-950/70 border border-red-500/60 text-red-200 text-xs flex items-start gap-2.5">
-                <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-bold text-red-300">AUTHENTICATION INTERRUPTED</p>
-                  <p className="text-[11px] text-red-200/80">{errorMsg}</p>
+              <div className="p-3.5 rounded-2xl bg-red-950/80 border border-red-500/60 text-red-200 text-xs space-y-2">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold text-red-300">AUTHENTICATION NOTICE</p>
+                    <p className="text-[11px] text-red-200/90 leading-relaxed">{errorMsg}</p>
+                  </div>
                 </div>
+
+                {/* Helpful 1-Click Action Button when username exists or not found */}
+                {errorCode === 'EXISTS' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('signin');
+                      setErrorMsg(null);
+                      setErrorCode(null);
+                    }}
+                    className="w-full py-2 px-3 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span>SWITCH TO SIGN IN WITH THIS CALLSIGN</span>
+                  </button>
+                )}
+
+                {errorCode === 'NOT_FOUND' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('signup');
+                      setErrorMsg(null);
+                      setErrorCode(null);
+                    }}
+                    className="w-full py-2 px-3 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>CREATE NEW ACCOUNT FOR THIS CALLSIGN</span>
+                  </button>
+                )}
               </div>
             )}
 
-            {isGoogleUser && profile ? (
+            {isRegistered && profile ? (
               /* Already Logged In Card */
               <div className="p-4 rounded-2xl bg-slate-900/80 border border-cyan-500/40 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] uppercase font-bold text-cyan-400 bg-cyan-950/80 border border-cyan-500/40 px-2.5 py-0.5 rounded-md flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                    PILOT CALLSIGN VERIFIED
+                    VERIFIED PILOT CALLSIGN
                   </span>
-                  <span className="text-[10px] text-slate-400 font-mono">
+                  <span className="text-[10px] text-emerald-400 font-bold font-mono">
                     RANKED PILOT
                   </span>
                 </div>
 
                 <div className="flex items-center gap-3.5 pt-1">
-                  {profile.photoURL ? (
-                    <img
-                      src={profile.photoURL}
-                      alt={profile.displayName}
-                      className="w-12 h-12 rounded-full border-2 border-cyan-400 object-cover shadow-[0_0_15px_rgba(0,240,255,0.3)] shrink-0"
-                    />
-                  ) : (
-                    <div className="w-12 h-12 rounded-full bg-slate-800 text-cyan-300 font-mono font-black flex items-center justify-center text-base border-2 border-cyan-400 shadow-[0_0_15px_rgba(0,240,255,0.3)] shrink-0">
-                      {profile.displayName.charAt(0).toUpperCase()}
-                    </div>
-                  )}
+                  <div
+                    className="w-12 h-12 rounded-full border-2 border-white flex items-center justify-center text-xl shadow-[0_0_15px_rgba(0,240,255,0.4)] shrink-0"
+                    style={{ backgroundColor: profile.photoURL || '#00F0FF' }}
+                  >
+                    {profile.displayName.charAt(0).toUpperCase()}
+                  </div>
                   <div className="min-w-0 flex-1">
-                    <p className="font-black text-white text-sm truncate">
+                    <p className="font-black text-white text-base truncate">
                       {profile.displayName}
                     </p>
-                    <p className="text-[11px] text-slate-400 truncate">
-                      {profile.email || 'Google Pilot Identity'}
+                    <p className="text-[10px] text-cyan-400 font-mono truncate">
+                      CALLSIGN ID: @{profile.displayName.toLowerCase()}
                     </p>
                     <div className="flex items-center gap-2 mt-1 text-[11px]">
                       <span className="text-amber-400 font-bold flex items-center gap-1">
@@ -455,7 +365,7 @@ export function FuturisticWelcomeWindow({
                     className="flex-1 py-3 px-4 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black rounded-xl uppercase text-xs tracking-wider transition-all shadow-[0_0_20px_rgba(0,240,255,0.3)] cursor-pointer flex items-center justify-center gap-1.5 active:scale-98"
                   >
                     <Zap className="w-4 h-4 fill-current" />
-                    <span>ENGAGE TAKEOFF</span>
+                    <span>ENTER COCKPIT & FLY</span>
                   </button>
 
                   {onLogout && (
@@ -463,187 +373,183 @@ export function FuturisticWelcomeWindow({
                       id="welcome-signout-btn"
                       onClick={onLogout}
                       className="py-3 px-3.5 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700 rounded-xl text-xs transition-all cursor-pointer flex items-center gap-1"
-                      title="Sign Out to Switch Pilot"
+                      title="Sign Out of Callsign"
                     >
                       <LogOut className="w-3.5 h-3.5" />
-                      <span className="text-[10px]">SWITCH</span>
+                      <span className="text-[10px]">LOGOUT</span>
                     </button>
                   )}
                 </div>
               </div>
             ) : (
-              /* Not Logged In State */
+              /* Sign In / Sign Up Form */
               <div className="space-y-4">
-                <div className="text-center space-y-1.5">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 text-xs font-bold mb-1 shadow-[0_0_12px_rgba(0,240,255,0.2)]">
-                    <Trophy className="w-3.5 h-3.5 text-amber-400" />
-                    <span>GLOBAL PILOT HALL OF FAME</span>
-                  </div>
-                  <h3 className="text-base sm:text-lg font-black text-white uppercase tracking-wide">
-                    LINK GOOGLE PILOT CALLSIGN
+                {/* Clean Tab Switcher: SIGN IN vs SIGN UP */}
+                <div className="flex rounded-2xl bg-slate-900/90 p-1 border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('signin');
+                      setErrorMsg(null);
+                      setErrorCode(null);
+                    }}
+                    className={`flex-1 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      authMode === 'signin'
+                        ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 shadow-[0_0_15px_rgba(0,240,255,0.3)]'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span>SIGN IN</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('signup');
+                      setErrorMsg(null);
+                      setErrorCode(null);
+                    }}
+                    className={`flex-1 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      authMode === 'signup'
+                        ? 'bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-[0_0_15px_rgba(168,85,247,0.3)]'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>SIGN UP (NEW PILOT)</span>
+                  </button>
+                </div>
+
+                <div className="text-center space-y-1">
+                  <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-wide">
+                    {authMode === 'signin'
+                      ? 'PILOT SIGN IN // ENTER COCKPIT'
+                      : 'REGISTER CALLSIGN // GLOBAL LEADERBOARD'}
                   </h3>
-                  <p className="text-xs text-slate-300 leading-relaxed max-w-sm mx-auto">
-                    Authenticate with your Google account before takeoff so your high scores, pilot callsign, and photo appear permanently on the <span className="text-cyan-400 font-bold">Global Leaderboard</span>!
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    {authMode === 'signin'
+                      ? 'Enter your registered Callsign and Password to sync your high score.'
+                      : 'Set your unique Callsign and Password to start your pilot career on the Leaderboard.'}
                   </p>
                 </div>
 
-                {/* Feature Points */}
-                <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-2.5 text-xs">
-                  <div className="flex items-center gap-2.5 text-slate-200">
-                    <div className="w-6 h-6 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
-                      <Trophy className="w-3.5 h-3.5" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-white text-[11px]">Sector Hall of Fame</p>
-                      <p className="text-[10px] text-slate-400">
-                        Compete for the #1 spot on the global Hall of Fame.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2.5 text-slate-200">
-                    <div className="w-6 h-6 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0">
-                      <ShieldCheck className="w-3.5 h-3.5" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-white text-[11px]">Verified Pilot Avatar</p>
-                      <p className="text-[10px] text-slate-400">
-                        Feature your genuine Google pilot photo in solo runs and duels.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2.5 text-slate-200">
-                    <div className="w-6 h-6 rounded-lg bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0">
-                      <Radio className="w-3.5 h-3.5" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-white text-[11px]">Cloud Telemetry Sync</p>
-                      <p className="text-[10px] text-slate-400">
-                        Records and high scores saved securely in the cloud.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Official Google Login Button */}
-                <button
-                  id="welcome-google-auth-btn"
-                  onClick={() => handleSignIn(false)}
-                  disabled={loading}
-                  className="w-full py-3.5 px-4 bg-white hover:bg-slate-100 text-slate-900 font-black rounded-xl uppercase font-mono text-xs tracking-wider transition-all duration-200 shadow-[0_0_25px_rgba(255,255,255,0.3)] hover:shadow-[0_0_30px_rgba(0,240,255,0.4)] flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed group active:scale-[0.98]"
-                >
-                  {loading ? (
-                    <div className="flex items-center gap-2 text-slate-900">
-                      <div className="w-4 h-4 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" />
-                      <span>CONNECTING TO GOOGLE...</span>
-                    </div>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                        <path
-                          fill="#4285F4"
-                          d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.14z"
-                        />
-                        <path
-                          fill="#34A853"
-                          d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.26 21.36 7.34 24 12 24z"
-                        />
-                        <path
-                          fill="#FBBC05"
-                          d="M5.28 14.27A7.06 7.06 0 0 1 4.9 12c0-.79.14-1.55.38-2.27V6.58H1.26A11.96 11.96 0 0 0 0 12c0 1.92.45 3.74 1.26 5.42l4.02-3.15z"
-                        />
-                        <path
-                          fill="#EA4335"
-                          d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-                        />
-                      </svg>
-                      <span>SIGN IN WITH GOOGLE</span>
-                    </>
-                  )}
-                </button>
-
-                {/* Redirect Sign-In Fallback Button (Ideal for mobile Safari / strict popup blockers) */}
-                {showRedirectOption && (
-                  <button
-                    id="welcome-google-redirect-btn"
-                    onClick={() => handleSignIn(true)}
-                    disabled={loading}
-                    className="w-full py-2.5 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-[0_0_15px_rgba(59,130,246,0.3)]"
-                  >
-                    <LogIn className="w-3.5 h-3.5" />
-                    <span>SIGN IN VIA FULL-PAGE REDIRECT (MOBILE / SAFARI)</span>
-                  </button>
-                )}
-
-                {/* Instant Pilot Callsign & Avatar Creator */}
-                <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-cyan-500/30 space-y-3 text-left">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-cyan-300 flex items-center gap-1.5">
-                      <Zap className="w-3.5 h-3.5 text-cyan-400" />
-                      QUICK PILOT IDENTITY & CALLSIGN
-                    </span>
-                    <span className="text-[9px] text-slate-400">INSTANT ACCESS</span>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-slate-400 block uppercase">
-                      Enter Callsign Name
+                <form onSubmit={handleSubmit} className="space-y-3 text-left">
+                  {/* Callsign / Username Input */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1">
+                      <User className="w-3 h-3 text-cyan-400" />
+                      <span>Pilot Callsign (Username)</span>
                     </label>
-                    <div className="flex gap-2">
+                    <div className="relative">
                       <input
+                        id="pilot-username-input"
                         type="text"
-                        value={customCallsign}
-                        onChange={(e) => setCustomCallsign(e.target.value)}
-                        placeholder="e.g. Maverick, StarWing..."
-                        maxLength={18}
-                        className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs font-bold text-white focus:outline-none focus:border-cyan-400 transition-colors"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        placeholder="e.g. Maverick, AeroAce, Falcon7"
+                        maxLength={20}
+                        required
+                        className="w-full pl-3.5 pr-4 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs font-bold text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Password Input */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1">
+                      <Lock className="w-3 h-3 text-cyan-400" />
+                      <span>Password (Access Key)</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        id="pilot-password-input"
+                        type={showPassword ? 'text' : 'password'}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder={authMode === 'signup' ? 'Create a secure password (4+ chars)' : 'Enter your password'}
+                        required
+                        className="w-full pl-3.5 pr-10 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs font-bold text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition-all font-mono"
                       />
                       <button
-                        onClick={handleSaveCustomCallsign}
-                        disabled={savingCallsign || !customCallsign.trim()}
-                        className="px-3.5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs transition-all cursor-pointer shadow-[0_0_12px_rgba(0,240,255,0.4)] disabled:opacity-50 shrink-0"
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1 cursor-pointer"
+                        title={showPassword ? 'Hide Password' : 'Show Password'}
                       >
-                        {savingCallsign ? 'SAVING...' : callsignSaved ? 'SAVED ✓' : 'SAVE & FLY'}
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
                   </div>
 
-                  {/* Avatar Badge Selector */}
-                  <div className="space-y-1">
-                    <span className="text-[10px] text-slate-400 block uppercase">
-                      Choose Pilot Insignia
-                    </span>
-                    <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                      {PILOT_AVATARS.map((av, idx) => (
-                        <button
-                          key={av.id}
-                          onClick={() => setSelectedAvatarIdx(idx)}
-                          className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-sm transition-all cursor-pointer shrink-0 ${
-                            selectedAvatarIdx === idx
-                              ? 'border-white scale-110 shadow-[0_0_12px_#00F0FF]'
-                              : 'border-slate-700 opacity-60 hover:opacity-100'
-                          }`}
-                          style={{ backgroundColor: av.color }}
-                          title={av.label}
-                        >
-                          {av.icon}
-                        </button>
-                      ))}
+                  {/* Avatar Insignia Selector (Only in Sign Up Mode) */}
+                  {authMode === 'signup' && (
+                    <div className="space-y-1.5 pt-1">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block">
+                        Choose Pilot Insignia Badge
+                      </span>
+                      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                        {PILOT_AVATARS.map((av, idx) => (
+                          <button
+                            key={av.id}
+                            type="button"
+                            onClick={() => setSelectedAvatarIdx(idx)}
+                            className={`w-9 h-9 rounded-full border-2 flex items-center justify-center text-sm transition-all cursor-pointer shrink-0 ${
+                              selectedAvatarIdx === idx
+                                ? 'border-white scale-110 shadow-[0_0_15px_#00F0FF]'
+                                : 'border-slate-700 opacity-60 hover:opacity-100'
+                            }`}
+                            style={{ backgroundColor: av.color }}
+                            title={av.label}
+                          >
+                            {av.icon}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  )}
 
-                {/* Secondary Option: Guest Bypass */}
-                <div className="pt-1 text-center">
+                  {/* Primary Submit Button */}
+                  <button
+                    id="pilot-auth-submit-btn"
+                    type="submit"
+                    disabled={loading || !username.trim() || !password}
+                    className={`w-full py-3.5 px-4 font-black rounded-xl uppercase font-mono text-xs tracking-wider transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-lg active:scale-98 mt-2 ${
+                      authMode === 'signup'
+                        ? 'bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-400 hover:to-indigo-500 text-white shadow-[0_0_20px_rgba(168,85,247,0.4)]'
+                        : 'bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 shadow-[0_0_20px_rgba(0,240,255,0.4)]'
+                    }`}
+                  >
+                    {loading ? (
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                        <span>PROCESSING TELEMETRY...</span>
+                      </div>
+                    ) : authMode === 'signup' ? (
+                      <>
+                        <UserPlus className="w-4 h-4" />
+                        <span>REGISTER CALLSIGN & ENTER COCKPIT</span>
+                      </>
+                    ) : (
+                      <>
+                        <LogIn className="w-4 h-4" />
+                        <span>AUTHENTICATE & ENTER COCKPIT</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+
+                {/* Always Available Guest Mode Option */}
+                <div className="pt-2 border-t border-slate-800/80 text-center space-y-2">
                   <button
                     id="welcome-guest-btn"
+                    type="button"
                     onClick={handleGuestBypass}
-                    className="w-full py-2 px-3 bg-slate-900/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-700 rounded-xl text-[11px] font-mono transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                    className="w-full py-2.5 px-3 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 hover:border-cyan-500/40 rounded-xl text-xs font-mono transition-all cursor-pointer flex items-center justify-center gap-1.5"
                   >
-                    <span>Fly as Cadet Pilot</span>
+                    <span>FLY AS GUEST / CADET</span>
                     <span className="text-slate-500 text-[10px]">
-                      (Scores recorded on local telemetry)
+                      (Instant offline flight)
                     </span>
                   </button>
                 </div>
@@ -652,9 +558,9 @@ export function FuturisticWelcomeWindow({
           </div>
         )}
 
-        {/* Footer info */}
+        {/* Footer Info */}
         <div className="px-6 py-2.5 bg-slate-900/80 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500 font-mono shrink-0">
-          <span>QUANTUM FLIGHT MATRIX // v4.2</span>
+          <span>CYBER FLAP QUANTUM MATRIX</span>
           <span className="text-cyan-400/80 font-bold">PRESS [SPACE] TO THRUST</span>
         </div>
       </div>

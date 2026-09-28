@@ -6,18 +6,16 @@
 import { useState, useEffect } from 'react';
 import {
   auth,
-  googleProvider,
-  signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
   signInAnonymously,
-  signOut,
   onAuthStateChanged,
   type User,
 } from './lib/firebase';
 import {
-  getOrCreateUserProfile,
   getLocalGuestProfile,
+  getActivePilotSession,
+  clearActivePilotSession,
+  registerPilotAccount,
+  loginPilotAccount,
   subscribeToRoom,
   updateCustomPilotProfile,
 } from './lib/gameService';
@@ -31,7 +29,9 @@ import { Palette, Trophy, Gamepad2, Users } from 'lucide-react';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profile, setProfile] = useState<UserProfile>(() => {
+    return getActivePilotSession() || getLocalGuestProfile();
+  });
   const [mode, setMode] = useState<'single' | 'multiplayer'>('single');
   const [currentTheme, setCurrentTheme] = useState<CyberThemeId>(() => {
     try {
@@ -54,7 +54,7 @@ export default function App() {
   const [welcomeInitialView, setWelcomeInitialView] = useState<'cinematic' | 'intro' | 'auth'>('cinematic');
   const [hasAskedAuthBeforeGame, setHasAskedAuthBeforeGame] = useState(false);
   const [isGuestDismissed, setIsGuestDismissed] = useState(false);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(false);
 
   const isModalOpen = showThemeWindow || showLeaderboard || showAuthModal;
 
@@ -84,36 +84,17 @@ export default function App() {
     }
   }, []);
 
-  // Listen to Firebase Auth state
+  // Background anonymous auth connection for real-time multiplayer signaling
   useEffect(() => {
     let isMounted = true;
-
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!isMounted) return;
-
       if (user) {
         setCurrentUser(user);
-        try {
-          const prof = await getOrCreateUserProfile(user);
-          if (isMounted) setProfile(prof);
-        } catch (e) {
-          console.warn('Profile fetch fallback to local:', e);
-          if (isMounted) setProfile(getLocalGuestProfile());
-        }
-        if (isMounted) setAuthLoading(false);
       } else {
-        // Attempt anonymous sign-in, with graceful fallback to local guest session
-        // if anonymous sign-in is disabled in Firebase console (auth/admin-restricted-operation)
-        try {
-          await signInAnonymously(auth);
-        } catch (err: unknown) {
-          // Anonymous authentication is restricted or offline; establish guest pilot session
-          if (isMounted) {
-            setCurrentUser(null);
-            setProfile(getLocalGuestProfile());
-            setAuthLoading(false);
-          }
-        }
+        signInAnonymously(auth).catch(() => {
+          // Anonymous authentication optional; local guest is active
+        });
       }
     });
 
@@ -123,23 +104,17 @@ export default function App() {
     };
   }, []);
 
-  // Listen for Google Redirect Sign-In results on return
+  // Prompt new players on first visit
   useEffect(() => {
-    getRedirectResult(auth)
-      .then(async (cred) => {
-        if (cred?.user) {
-          setCurrentUser(cred.user);
-          const prof = await getOrCreateUserProfile(cred.user);
-          setProfile(prof);
-          setHasAskedAuthBeforeGame(true);
-        }
-      })
-      .catch((err) => {
-        console.warn('Redirect auth result warning:', err);
-      });
-  }, []);
+    if (!hasAskedAuthBeforeGame) {
+      const active = getActivePilotSession();
+      if (!active) {
+        setShowAuthModal(true);
+      }
+    }
+  }, [hasAskedAuthBeforeGame]);
 
-  // Subscribe to real-time room updates if in an active room
+  // Subscribe to real-time room updates if in an active multiplayer room
   useEffect(() => {
     if (!activeRoom?.id) return;
 
@@ -154,73 +129,40 @@ export default function App() {
     return () => unsubscribe();
   }, [activeRoom?.id]);
 
-  // Check if we need to ask the user to log in with Google before the game starts
-  useEffect(() => {
-    if (!authLoading && !hasAskedAuthBeforeGame) {
-      const isGoogle = !!currentUser && !currentUser.isAnonymous;
-      if (!isGoogle) {
-        setShowAuthModal(true);
-      }
+  // Pilot Register Handler
+  const handleRegisterPilot = async (
+    username: string,
+    password: string,
+    avatarColor?: string
+  ): Promise<{ success: boolean; error?: string; code?: 'EXISTS' | 'INVALID' }> => {
+    const res = await registerPilotAccount(username, password, avatarColor);
+    if (res.success && res.profile) {
+      setProfile(res.profile);
+      setHasAskedAuthBeforeGame(true);
+      return { success: true };
     }
-  }, [authLoading, currentUser, hasAskedAuthBeforeGame]);
-
-  // Google Sign-In with popup + redirect fallback support & clear error diagnostic
-  const handleGoogleLogin = async (
-    useRedirect = false
-  ): Promise<{ success: boolean; error?: string; code?: string; redirecting?: boolean }> => {
-    try {
-      if (useRedirect) {
-        await signInWithRedirect(auth, googleProvider);
-        return { success: false, redirecting: true };
-      }
-      const cred = await signInWithPopup(auth, googleProvider);
-      if (cred.user) {
-        setCurrentUser(cred.user);
-        const prof = await getOrCreateUserProfile(cred.user);
-        setProfile(prof);
-        setHasAskedAuthBeforeGame(true);
-        return { success: true };
-      }
-      return { success: false, error: 'Sign-in cancelled or window closed.' };
-    } catch (err: unknown) {
-      console.warn('Google sign-in error:', err);
-      const anyErr = err as { code?: string; message?: string };
-      const code = anyErr?.code || '';
-      let message = anyErr?.message || 'Authentication failed';
-
-      if (code === 'auth/popup-blocked') {
-        message = 'Popup was blocked by your browser. Tap "Sign In With Redirect" or allow popups.';
-      } else if (code === 'auth/unauthorized-domain') {
-        message = 'Firebase domain verification notice. You can instantly register your Pilot Call Sign below!';
-      } else if (code === 'auth/popup-closed-by-user') {
-        message = 'The Google sign-in window was closed before completion.';
-      } else if (code === 'auth/cancelled-popup-request') {
-        message = 'Another sign-in request is already in progress.';
-      }
-      return { success: false, error: message, code };
-    }
+    return { success: false, error: res.error, code: res.code };
   };
 
-  // Direct Pilot Callsign & Avatar registration (for users who prefer direct identity or when OAuth popup is restricted)
-  const handleSavePilotCallsign = async (displayName: string, photoURL?: string) => {
-    if (!profile) return;
-    try {
-      const updated = await updateCustomPilotProfile(profile, displayName, photoURL);
-      setProfile(updated);
-    } catch (err) {
-      console.warn('Failed to update pilot callsign:', err);
+  // Pilot Sign-In Handler
+  const handleLoginPilot = async (
+    username: string,
+    password: string
+  ): Promise<{ success: boolean; error?: string; code?: 'NOT_FOUND' | 'WRONG_PASSWORD' }> => {
+    const res = await loginPilotAccount(username, password);
+    if (res.success && res.profile) {
+      setProfile(res.profile);
+      setHasAskedAuthBeforeGame(true);
+      return { success: true };
     }
+    return { success: false, error: res.error, code: res.code };
   };
 
   // Sign out (reverts smoothly to local guest pilot)
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      setCurrentUser(null);
-      setProfile(getLocalGuestProfile());
-    } catch (err) {
-      console.warn('Logout error:', err);
-    }
+  const handleLogout = () => {
+    clearActivePilotSession();
+    const guest = getLocalGuestProfile();
+    setProfile(guest);
   };
 
   const handleUpdateProfile = (updated: Partial<UserProfile>) => {
@@ -256,8 +198,6 @@ export default function App() {
                 setWelcomeInitialView('auth');
                 setShowAuthModal(true);
               }}
-              onLoginGoogle={handleGoogleLogin}
-              onSavePilotCallsign={handleSavePilotCallsign}
               isModalOpen={isModalOpen}
               onOpenCinematic={() => {
                 setWelcomeInitialView('cinematic');
@@ -336,7 +276,10 @@ export default function App() {
                         setActiveRoom(null);
                       }}
                       currentUser={currentUser}
-                      onLoginGoogle={handleGoogleLogin}
+                      onOpenAuthModal={() => {
+                        setWelcomeInitialView('auth');
+                        setShowAuthModal(true);
+                      }}
                     />
                   </div>
                 </div>
@@ -358,7 +301,6 @@ export default function App() {
                     setWelcomeInitialView('auth');
                     setShowAuthModal(true);
                   }}
-                  onLoginGoogle={handleGoogleLogin}
                   isModalOpen={isModalOpen}
                   onOpenCinematic={() => {
                     setWelcomeInitialView('cinematic');
@@ -393,7 +335,7 @@ export default function App() {
         }}
       />
 
-      {/* Futuristic Welcome Window & Pilot Google Clearance */}
+      {/* Futuristic Welcome Window & Pilot Username/Password Clearance */}
       <FuturisticWelcomeWindow
         isOpen={showAuthModal}
         onClose={() => {
@@ -401,10 +343,9 @@ export default function App() {
           setHasAskedAuthBeforeGame(true);
           setIsGuestDismissed(true);
         }}
-        onLoginGoogle={handleGoogleLogin}
-        onSavePilotCallsign={handleSavePilotCallsign}
+        onRegisterPilot={handleRegisterPilot}
+        onLoginPilot={handleLoginPilot}
         onLogout={handleLogout}
-        currentUser={currentUser}
         profile={profile}
         initialView={welcomeInitialView}
         onSelectCraft={handleSelectCraft}
@@ -419,10 +360,12 @@ export default function App() {
       <LeaderboardModal
         isOpen={showLeaderboard}
         onClose={() => setShowLeaderboard(false)}
-        currentUserUid={currentUser?.uid || profile?.uid}
+        currentUserUid={profile?.uid}
         userProfile={profile}
-        currentUser={currentUser}
-        onLoginGoogle={handleGoogleLogin}
+        onOpenAuthModal={() => {
+          setWelcomeInitialView('auth');
+          setShowAuthModal(true);
+        }}
       />
     </div>
   );

@@ -27,7 +27,7 @@ interface Props {
   onRoomUpdated: (room: MultiplayerRoom | null) => void;
   onBackToMenu: () => void;
   currentUser?: User | null;
-  onLoginGoogle?: () => void;
+  onOpenAuthModal?: () => void;
 }
 
 export function MultiplayerLobby({
@@ -35,8 +35,7 @@ export function MultiplayerLobby({
   activeRoom,
   onRoomUpdated,
   onBackToMenu,
-  currentUser,
-  onLoginGoogle,
+  onOpenAuthModal,
 }: Props) {
   const [inputCode, setInputCode] = useState('');
   const [loading, setLoading] = useState(false);
@@ -303,24 +302,22 @@ export function MultiplayerLobby({
         </div>
       )}
 
-      {!currentUser && (
+      {!userProfile.isRegisteredPilot && onOpenAuthModal && (
         <div className="p-3.5 rounded-2xl bg-cyan-950/40 border border-cyan-500/40 space-y-2">
           <div className="flex items-center gap-2 text-cyan-400 font-bold text-xs">
             <Zap className="w-4 h-4 text-cyan-400 shrink-0" />
-            <span>CLOUD WARP SYNCHRONIZATION</span>
+            <span>PILOT CALLSIGN & LEADERBOARD SYNC</span>
           </div>
           <p className="text-[11px] text-slate-300 leading-relaxed font-sans">
-            You are currently playing as Cadet Pilot. Sign in with Google to synchronize pilot stats and challenge friends across devices!
+            You are currently playing as Cadet Pilot. Sign Up or Sign In with your Callsign to record duel victories and stream stats to the Global Leaderboard!
           </p>
-          {onLoginGoogle && (
-            <button
-              onClick={onLoginGoogle}
-              className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black text-xs uppercase flex items-center justify-center gap-1.5 transition-all shadow-[0_0_12px_rgba(0,240,255,0.3)] cursor-pointer"
-            >
-              <LogIn className="w-3.5 h-3.5" />
-              <span>SIGN IN WITH GOOGLE</span>
-            </button>
-          )}
+          <button
+            onClick={onOpenAuthModal}
+            className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-400 hover:to-indigo-500 text-white font-black text-xs uppercase flex items-center justify-center gap-1.5 transition-all shadow-[0_0_15px_rgba(168,85,247,0.4)] cursor-pointer"
+          >
+            <LogIn className="w-3.5 h-3.5" />
+            <span>REGISTER OR SIGN IN CALLSIGN</span>
+          </button>
         </div>
       )}
 

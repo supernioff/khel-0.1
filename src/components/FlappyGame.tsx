@@ -22,6 +22,7 @@ import {
   Crown,
   Gamepad2,
   Users,
+  UserPlus,
 } from 'lucide-react';
 import { soundManager } from '../lib/audio';
 import {
@@ -64,7 +65,6 @@ interface Props {
   onOpenThemeWindow?: () => void;
   currentUser?: User | null;
   onOpenAuthModal?: () => void;
-  onLoginGoogle?: (useRedirect?: boolean) => Promise<any>;
   onSavePilotCallsign?: (displayName: string, photoURL?: string) => Promise<void>;
   isModalOpen?: boolean;
   onOpenCinematic?: () => void;
@@ -102,7 +102,6 @@ export function FlappyGame({
   onOpenThemeWindow,
   currentUser,
   onOpenAuthModal,
-  onLoginGoogle,
   onSavePilotCallsign,
   isModalOpen = false,
   onOpenCinematic,
@@ -122,7 +121,8 @@ export function FlappyGame({
   const [musicMuted, setMusicMuted] = useState(soundManager.isMusicMuted());
   const [voiceEnabled, setVoiceEnabled] = useState(soundManager.isVoiceEnabled());
 
-  const isGoogleUser = Boolean(currentUser && !currentUser.isAnonymous);
+  const isRegisteredPilot = Boolean(userProfile.isRegisteredPilot);
+  const isGoogleUser = isRegisteredPilot;
   const guestBypassedAuthRef = useRef(isGuestDismissed);
   const [guestBypassedState, setGuestBypassedState] = useState(isGuestDismissed);
 
@@ -237,6 +237,7 @@ export function FlappyGame({
   const screenShakeRef = useRef(0);
   const pipeSpawnCountRef = useRef(0);
   const opponentCrashedRef = useRef(false);
+  const crashTimestampRef = useRef(0);
 
   // Entry Guardian Creature Ref (Aero-Chrome Launch Sentinel)
   const guardianRef = useRef<{
@@ -493,8 +494,9 @@ export function FlappyGame({
         });
       }
     } else if (gameState === 'gameover') {
-      // Direct instant restart via click or spacebar
-      handleRestart();
+      // Do NOT restart on casual canvas taps or clicks!
+      // Players must tap the dedicated "REBOOT CHASSIS" button or press Space/R to relaunch.
+      return;
     }
   }, [
     gameState,
@@ -515,6 +517,7 @@ export function FlappyGame({
   const handleCrash = useCallback(() => {
     if (!isAlive.current) return;
     isAlive.current = false;
+    crashTimestampRef.current = Date.now();
 
     // Cinematic Audio & Speech cues
     soundManager.playHit();
@@ -2454,6 +2457,9 @@ export function FlappyGame({
 
   // Restart match in single or rematch in multiplayer
   const handleRestart = async () => {
+    // Grace period so crash impulse taps don't accidentally restart immediately
+    if (Date.now() - crashTimestampRef.current < 450) return;
+
     if (isMultiplayer && activeRoom) {
       if (rematchLoading) return;
       try {
@@ -2483,8 +2489,14 @@ export function FlappyGame({
         id="canvas-container"
         ref={containerRef}
         className="relative w-full h-full flex-1 overflow-hidden bg-slate-950 cursor-pointer touch-none flex flex-col"
-        onClick={handleFlap}
+        onClick={() => {
+          if (gameState === 'gameover') return;
+          handleFlap();
+        }}
         onTouchStart={(e) => {
+          // In gameover state, do NOT preventDefault or trigger flap!
+          // This allows all buttons on the crash window to receive touches cleanly!
+          if (gameState === 'gameover') return;
           e.preventDefault();
           handleFlap();
         }}
@@ -2496,7 +2508,10 @@ export function FlappyGame({
         />
 
         {/* Minimalist Aerospace Top HUD */}
-        <div className="absolute top-0 inset-x-0 pt-safe px-2 sm:px-4 pt-2 sm:pt-3 flex items-center justify-between pointer-events-none z-10 font-mono gap-1 sm:gap-2">
+        <div
+          className="absolute top-0 inset-x-0 pt-safe px-2 sm:px-4 pt-2 sm:pt-3 flex items-center justify-between pointer-events-none z-10 font-mono gap-1 sm:gap-2"
+          onTouchStart={(e) => e.stopPropagation()}
+        >
           {/* Top-Left: Pilot Avatar, Warp Speed, & Flight Mode */}
           <div className="flex items-center gap-1 sm:gap-1.5 pointer-events-auto min-w-0">
             {/* Pilot Callsign Avatar */}
@@ -2530,13 +2545,12 @@ export function FlappyGame({
                 onClick={(e) => {
                   e.stopPropagation();
                   if (onOpenAuthModal) onOpenAuthModal();
-                  else if (onLoginGoogle) onLoginGoogle();
                 }}
-                className="p-1.5 sm:p-2 rounded-full bg-amber-950/80 hover:bg-amber-900 border border-amber-400/80 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.35)] animate-pulse transition-all cursor-pointer flex items-center justify-center shrink-0"
-                title="Sign in with Google to post your score to Leaderboard"
-                aria-label="Sign in with Google"
+                className="p-1.5 sm:p-2 rounded-full bg-purple-950/80 hover:bg-purple-900 border border-purple-400/80 text-purple-300 shadow-[0_0_12px_rgba(168,85,247,0.35)] animate-pulse transition-all cursor-pointer flex items-center justify-center shrink-0"
+                title="Sign Up or Sign In to post your score to Leaderboard"
+                aria-label="Pilot Sign In / Sign Up"
               >
-                <LogIn className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
+                <LogIn className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-400" />
               </button>
             )}
 
@@ -2863,6 +2877,8 @@ export function FlappyGame({
             id="pre-flight-clearance-card"
             className="absolute top-16 sm:top-20 left-1/2 -translate-x-1/2 z-20 pointer-events-auto font-mono w-[94%] max-w-md animate-in fade-in slide-in-from-top-3 duration-300"
             onClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
           >
             <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-950/92 backdrop-blur-md border border-cyan-500/40 shadow-[0_0_35px_rgba(0,240,255,0.25)] space-y-2.5">
               <div className="flex items-center justify-between">
@@ -2908,30 +2924,26 @@ export function FlappyGame({
               ) : (
                 <div className="space-y-2">
                   <p className="text-xs text-slate-200 font-semibold leading-relaxed">
-                    Log in with your Google account before takeoff so your flight callsign, avatar, and high score are recorded on the <span className="text-cyan-400 font-bold">Global Leaderboard</span>!
+                    Register your Callsign ID & password before takeoff so your flight rank, insignia, and high score stream to the <span className="text-cyan-400 font-bold">Global Leaderboard</span>!
                   </p>
 
                   <div className="flex items-center gap-2 pt-0.5">
                     <button
-                      id="idle-google-signin-action-btn"
-                      onClick={() => {
+                      id="idle-pilot-signin-action-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
                         if (onOpenAuthModal) onOpenAuthModal();
-                        else if (onLoginGoogle) onLoginGoogle();
                       }}
-                      className="flex-1 py-2 px-3 bg-white hover:bg-slate-100 text-slate-900 font-black rounded-xl text-xs uppercase font-mono transition-all shadow-[0_0_15px_rgba(255,255,255,0.3)] flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+                      className="flex-1 py-2 px-3 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-400 hover:to-indigo-500 text-white font-black rounded-xl text-xs uppercase font-mono transition-all shadow-[0_0_15px_rgba(168,85,247,0.4)] flex items-center justify-center gap-2 cursor-pointer active:scale-98"
                     >
-                      <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
-                        <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.14z"/>
-                        <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.26 21.36 7.34 24 12 24z"/>
-                        <path fill="#FBBC05" d="M5.28 14.27A7.06 7.06 0 0 1 4.9 12c0-.79.14-1.55.38-2.27V6.58H1.26A11.96 11.96 0 0 0 0 12c0 1.92.45 3.74 1.26 5.42l4.02-3.15z"/>
-                        <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
-                      </svg>
-                      <span>LOG IN WITH GOOGLE</span>
+                      <UserPlus className="w-3.5 h-3.5 shrink-0" />
+                      <span>SIGN UP / SIGN IN</span>
                     </button>
 
                     <button
                       id="idle-guest-bypass-btn"
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         guestBypassedAuthRef.current = true;
                         setGuestBypassedState(true);
                         if (onDismissGuestClearance) onDismissGuestClearance();
@@ -2994,6 +3006,8 @@ export function FlappyGame({
             id="game-over-overlay"
             className="absolute bottom-3 sm:bottom-6 left-1/2 -translate-x-1/2 w-[94%] max-w-lg z-30 pointer-events-auto font-mono animate-in slide-in-from-bottom-4 duration-300"
             onClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
           >
             <div className="bg-slate-950/85 backdrop-blur-md border border-rose-500/40 rounded-2xl p-3.5 sm:p-4.5 shadow-[0_0_35px_rgba(244,63,94,0.25)] space-y-3">
               {/* Tactical Status & Chassis Readout */}
@@ -3052,20 +3066,20 @@ export function FlappyGame({
                 </div>
               ) : (
                 <div
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     if (onOpenAuthModal) onOpenAuthModal();
-                    else if (onLoginGoogle) onLoginGoogle();
                   }}
-                  className="px-3 py-2 rounded-xl bg-amber-950/70 hover:bg-amber-900/80 border border-amber-500/50 text-amber-200 text-xs flex items-center justify-between gap-2 cursor-pointer transition-all shadow-[0_0_15px_rgba(245,158,11,0.2)]"
+                  className="px-3 py-2 rounded-xl bg-purple-950/70 hover:bg-purple-900/80 border border-purple-500/50 text-purple-200 text-xs flex items-center justify-between gap-2 cursor-pointer transition-all shadow-[0_0_15px_rgba(168,85,247,0.3)]"
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping shrink-0" />
                     <span className="text-[11px] truncate text-slate-200">
-                      Guest run: <strong className="text-amber-400 font-black">{score} pts</strong>. Post to Global Leaderboard?
+                      Cadet run: <strong className="text-amber-400 font-black">{score} pts</strong>. Post to Leaderboard?
                     </span>
                   </div>
-                  <span className="px-2 py-1 bg-amber-400 text-slate-950 font-black rounded-lg text-[10px] uppercase shrink-0">
-                    SIGN IN
+                  <span className="px-2.5 py-1 bg-gradient-to-r from-purple-500 to-indigo-600 text-white font-black rounded-lg text-[10px] uppercase shrink-0">
+                    SIGN UP / IN
                   </span>
                 </div>
               )}
@@ -3076,7 +3090,10 @@ export function FlappyGame({
                   <button
                     id="rematch-race-btn"
                     disabled={rematchLoading}
-                    onClick={handleRestart}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRestart();
+                    }}
                     className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-950/60 disabled:text-emerald-400/50 text-slate-950 font-black rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center gap-2 cursor-pointer text-xs uppercase tracking-wider active:scale-98"
                   >
                     <RotateCcw className={`w-4 h-4 ${rematchLoading ? 'animate-spin' : ''}`} />
@@ -3089,11 +3106,14 @@ export function FlappyGame({
                 ) : (
                   <button
                     id="play-again-single-btn"
-                    onClick={handleRestart}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRestart();
+                    }}
                     className="w-full py-3 sm:py-3.5 px-4 bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black rounded-xl shadow-[0_0_25px_rgba(0,240,255,0.4)] transition-all active:scale-98 flex items-center justify-center gap-2 cursor-pointer text-xs uppercase tracking-wider"
                   >
                     <RotateCcw className="w-4 h-4" />
-                    <span>REBOOT CHASSIS & THRUSTERS [SPACE / CLICK]</span>
+                    <span>REBOOT CHASSIS & THRUSTERS [CLICK TO FLY AGAIN]</span>
                   </button>
                 )}
 
@@ -3102,7 +3122,10 @@ export function FlappyGame({
                   {onOpenLeaderboard && (
                     <button
                       id="view-leaderboard-from-gameover-btn"
-                      onClick={onOpenLeaderboard}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenLeaderboard();
+                      }}
                       className="flex-1 py-2 px-3 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <Trophy className="w-3.5 h-3.5 text-amber-400" />
@@ -3113,7 +3136,10 @@ export function FlappyGame({
                   {onOpenThemeWindow && (
                     <button
                       id="open-theme-from-gameover-btn"
-                      onClick={onOpenThemeWindow}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenThemeWindow();
+                      }}
                       className="flex-1 py-2 px-3 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <Palette className="w-3.5 h-3.5 text-purple-400" />
@@ -3123,7 +3149,10 @@ export function FlappyGame({
 
                   <button
                     id="gameover-fullscreen-toggle-btn"
-                    onClick={toggleFullscreen}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleFullscreen();
+                    }}
                     className="py-2 px-3 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-cyan-400 border border-cyan-500/40 text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
                     title={isFullscreen ? 'Exit Fullscreen' : 'Enter Universal Fullscreen'}
                   >
@@ -3134,7 +3163,10 @@ export function FlappyGame({
                   {isMultiplayer && onExitRoom && (
                     <button
                       id="exit-to-lobby-btn"
-                      onClick={onExitRoom}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onExitRoom();
+                      }}
                       className="py-2 px-3 text-xs text-slate-400 hover:text-white transition-colors cursor-pointer border border-slate-800 rounded-lg shrink-0"
                     >
                       EXIT
