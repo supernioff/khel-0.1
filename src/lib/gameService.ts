@@ -384,16 +384,22 @@ export async function getOrCreateUserProfile(user: User): Promise<UserProfile> {
  * Persists locally and syncs to Firestore if user is authenticated.
  */
 export async function updateUserScore(uid: string, score: number, currentHighScore: number): Promise<number> {
-  const newHighScore = Math.max(score, currentHighScore);
+  const activeSession = getActivePilotSession();
+  const guestProf = getLocalGuestProfile();
+  const existingBest = Math.max(
+    currentHighScore || 0,
+    activeSession?.highScore || 0,
+    guestProf?.highScore || 0
+  );
+  const newHighScore = Math.max(score, existingBest);
 
   // Update local storage so guest/pilot progress and callsign are guaranteed safe
   let currentDisplayName = 'Cadet Pilot';
   let currentPhotoURL: string | undefined = undefined;
-  const activeSession = getActivePilotSession();
 
   try {
-    const localProfile = activeSession || getLocalGuestProfile();
-    localProfile.highScore = Math.max(localProfile.highScore || 0, newHighScore);
+    const localProfile = activeSession || guestProf;
+    localProfile.highScore = newHighScore;
     localProfile.gamesPlayed = (localProfile.gamesPlayed || 0) + 1;
     localProfile.updatedAt = new Date().toISOString();
     if (localProfile.displayName && localProfile.displayName !== 'Guest Pilot') {
@@ -402,7 +408,8 @@ export async function updateUserScore(uid: string, score: number, currentHighSco
     currentPhotoURL = localProfile.photoURL;
 
     if (activeSession) {
-      saveActivePilotSession(localProfile);
+      activeSession.highScore = newHighScore;
+      saveActivePilotSession(activeSession);
     }
     saveLocalGuestProfile(localProfile);
   } catch (e) {

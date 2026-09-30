@@ -26,6 +26,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import { soundManager } from '../lib/audio';
+import { PilotAvatar } from './PilotAvatar';
 import {
   updateUserScore,
   syncPlayerRaceState,
@@ -203,12 +204,10 @@ export function FlappyGame({
   } | null>(null);
   const milestoneTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Sync high score from user profile
+  // Sync high score accurately from user profile
   useEffect(() => {
-    if (userProfile.highScore > highScore) {
-      setHighScore(userProfile.highScore);
-    }
-  }, [userProfile.highScore, highScore]);
+    setHighScore(userProfile.highScore || 0);
+  }, [userProfile.highScore]);
 
   // Opponent race info
   const opponent = isMultiplayer
@@ -2525,21 +2524,16 @@ export function FlappyGame({
                   e.stopPropagation();
                   if (onOpenAuthModal) onOpenAuthModal();
                 }}
-                className="relative p-0.5 rounded-full bg-slate-950/90 hover:bg-slate-900 border-2 border-cyan-400 hover:border-cyan-300 shadow-[0_0_12px_rgba(0,240,255,0.4)] transition-all cursor-pointer group shrink-0"
-                title={`Pilot: ${userProfile.displayName} // Callsign Verified`}
+                className="relative p-0.5 rounded-full hover:scale-105 transition-all cursor-pointer group shrink-0"
+                title={`Pilot: ${userProfile.displayName} // Insignia Verified (Click to open terminal)`}
                 aria-label="Pilot Profile"
               >
-                {userProfile.photoURL ? (
-                  <img
-                    src={userProfile.photoURL}
-                    alt={userProfile.displayName}
-                    className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover"
-                  />
-                ) : (
-                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-slate-800 text-cyan-300 font-bold flex items-center justify-center text-xs">
-                    {userProfile.displayName.charAt(0).toUpperCase()}
-                  </div>
-                )}
+                <PilotAvatar
+                  photoURL={userProfile.photoURL}
+                  name={userProfile.displayName}
+                  size="sm"
+                  showGlow={true}
+                />
                 <span className="absolute bottom-0 right-0 w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-emerald-400 border-2 border-slate-950 animate-pulse" />
               </button>
             ) : (
@@ -2899,24 +2893,12 @@ export function FlappyGame({
               {isGoogleUser ? (
                 <div className="flex items-center justify-between bg-slate-900/80 p-2.5 rounded-xl border border-cyan-500/30 gap-2">
                   <div className="flex items-center gap-2.5 min-w-0">
-                    {userProfile.photoURL && userProfile.photoURL.startsWith('#') ? (
-                      <div
-                        className="w-8 h-8 rounded-full border border-white flex items-center justify-center font-black text-xs text-slate-950 shrink-0"
-                        style={{ backgroundColor: userProfile.photoURL }}
-                      >
-                        {userProfile.displayName.charAt(0).toUpperCase()}
-                      </div>
-                    ) : userProfile.photoURL && userProfile.photoURL.startsWith('http') ? (
-                      <img
-                        src={userProfile.photoURL}
-                        alt={userProfile.displayName}
-                        className="w-8 h-8 rounded-full border border-cyan-400 object-cover shrink-0"
-                      />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-slate-800 text-cyan-300 font-bold flex items-center justify-center text-xs shrink-0 border border-cyan-400">
-                        {userProfile.displayName.charAt(0).toUpperCase()}
-                      </div>
-                    )}
+                    <PilotAvatar
+                      photoURL={userProfile.photoURL}
+                      name={userProfile.displayName}
+                      size="sm"
+                      showGlow={true}
+                    />
                     <div className="min-w-0">
                       <p className="text-xs font-bold text-white truncate flex items-center gap-1">
                         <span>PILOT: {userProfile.displayName}</span>

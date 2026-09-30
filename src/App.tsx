@@ -358,6 +358,7 @@ export default function App() {
           setHasAskedAuthBeforeGame(true);
           setIsGuestDismissed(true);
         }}
+        onUpdateProfile={handleUpdateProfile}
       />
 
       {/* Global Cyber Pilot Hall of Fame Modal */}

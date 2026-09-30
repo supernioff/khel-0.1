@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ShieldCheck,
   X,
@@ -16,10 +16,13 @@ import {
   Film,
   Lock,
   User,
-  KeyRound,
+  Palette,
 } from 'lucide-react';
 import type { UserProfile, BirdCraftId } from '../types/game';
+import { PILOT_AVATARS } from '../types/game';
 import { CinematicIntro } from './CinematicIntro';
+import { PilotAvatar } from './PilotAvatar';
+import { updateCustomPilotProfile } from '../lib/gameService';
 
 interface Props {
   isOpen: boolean;
@@ -27,7 +30,7 @@ interface Props {
   onRegisterPilot: (
     username: string,
     password: string,
-    avatarColor?: string
+    avatarId?: string
   ) => Promise<{ success: boolean; error?: string; code?: 'EXISTS' | 'INVALID' }>;
   onLoginPilot: (
     username: string,
@@ -38,16 +41,8 @@ interface Props {
   onContinueAsGuest?: () => void;
   initialView?: 'cinematic' | 'intro' | 'auth';
   onSelectCraft?: (craftId: BirdCraftId) => void;
+  onUpdateProfile?: (updated: Partial<UserProfile>) => void;
 }
-
-const PILOT_AVATARS = [
-  { id: 'valkyrie', label: 'Valkyrie-01', color: '#00F0FF', icon: '⚡' },
-  { id: 'solaris', label: 'Solar-Pyro', color: '#FF4500', icon: '🔥' },
-  { id: 'shadow', label: 'Void-Nox', color: '#A855F7', icon: '🌑' },
-  { id: 'chrono', label: 'Flora-Bloom', color: '#10B981', icon: '🌿' },
-  { id: 'titan', label: 'Aegis-Guard', color: '#F59E0B', icon: '🛡️' },
-  { id: 'phase', label: 'Mirage-Astra', color: '#00FFA3', icon: '✨' },
-];
 
 export function FuturisticWelcomeWindow({
   isOpen,
@@ -58,6 +53,7 @@ export function FuturisticWelcomeWindow({
   profile,
   onContinueAsGuest,
   initialView = 'cinematic',
+  onUpdateProfile,
 }: Props) {
   const [phase, setPhase] = useState<'cinematic' | 'intro' | 'auth'>(initialView);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signup');
@@ -70,7 +66,7 @@ export function FuturisticWelcomeWindow({
   const [errorCode, setErrorCode] = useState<'EXISTS' | 'NOT_FOUND' | 'WRONG_PASSWORD' | null>(null);
   const [justLoggedIn, setJustLoggedIn] = useState(false);
   const [logoutSuccess, setLogoutSuccess] = useState(false);
-  const [rotationAngle, setRotationAngle] = useState(0);
+  const [avatarUpdateSuccess, setAvatarUpdateSuccess] = useState(false);
 
   // Sync initial view when modal reopens
   useEffect(() => {
@@ -80,14 +76,19 @@ export function FuturisticWelcomeWindow({
       setErrorCode(null);
       setJustLoggedIn(false);
       setLogoutSuccess(false);
+      setAvatarUpdateSuccess(false);
       if (profile?.isRegisteredPilot && profile.displayName) {
         setUsername(profile.displayName);
+        const curIdx = PILOT_AVATARS.findIndex(
+          (a) => a.id === profile.photoURL || a.color.toLowerCase() === profile.photoURL?.toLowerCase()
+        );
+        if (curIdx >= 0) setSelectedAvatarIdx(curIdx);
       } else {
         setUsername('');
         setPassword('');
       }
     }
-  }, [isOpen, initialView, profile?.displayName, profile?.isRegisteredPilot]);
+  }, [isOpen, initialView, profile?.displayName, profile?.isRegisteredPilot, profile?.photoURL]);
 
   const handleLogoutClick = () => {
     if (onLogout) {
@@ -102,14 +103,19 @@ export function FuturisticWelcomeWindow({
     setAuthMode('signin');
   };
 
-  // Rotating telemetry radar effect
-  useEffect(() => {
-    if (!isOpen) return;
-    const interval = setInterval(() => {
-      setRotationAngle((prev) => (prev + 1.2) % 360);
-    }, 30);
-    return () => clearInterval(interval);
-  }, [isOpen]);
+  const handleAvatarChangeForLoggedIn = async (avatarId: string) => {
+    if (!profile) return;
+    try {
+      const updated = await updateCustomPilotProfile(profile, profile.displayName, avatarId);
+      if (onUpdateProfile) {
+        onUpdateProfile(updated);
+      }
+      setAvatarUpdateSuccess(true);
+      setTimeout(() => setAvatarUpdateSuccess(false), 2000);
+    } catch (e) {
+      console.warn('Avatar update failed:', e);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -133,8 +139,8 @@ export function FuturisticWelcomeWindow({
     setLoading(true);
     try {
       if (authMode === 'signup') {
-        const avatarColor = PILOT_AVATARS[selectedAvatarIdx]?.color || '#00F0FF';
-        const res = await onRegisterPilot(cleanUser, password, avatarColor);
+        const avatarId = PILOT_AVATARS[selectedAvatarIdx]?.id || 'valkyrie';
+        const res = await onRegisterPilot(cleanUser, password, avatarId);
         if (res.success) {
           setJustLoggedIn(true);
           setTimeout(() => {
@@ -156,7 +162,7 @@ export function FuturisticWelcomeWindow({
             onClose();
           }, 900);
         } else {
-          setErrorMsg(res.error || 'Sign in failed.');
+          setErrorMsg(res.error || 'Sign in failed. Check your password.');
           if (res.code === 'NOT_FOUND') {
             setErrorCode('NOT_FOUND');
           } else if (res.code === 'WRONG_PASSWORD') {
@@ -165,7 +171,7 @@ export function FuturisticWelcomeWindow({
         }
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Authentication failed';
+      const msg = err instanceof Error ? err.message : 'Authentication failed.';
       setErrorMsg(msg);
     } finally {
       setLoading(false);
@@ -183,18 +189,18 @@ export function FuturisticWelcomeWindow({
   return (
     <div
       id="futuristic-welcome-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md animate-in fade-in duration-300"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-5 bg-black/85 backdrop-blur-md animate-in fade-in duration-300"
       onClick={handleGuestBypass}
     >
       <div
         id="futuristic-welcome-modal"
-        className="w-full max-w-lg bg-slate-950/95 rounded-3xl shadow-[0_0_60px_rgba(0,240,255,0.3)] border-2 border-cyan-500/40 text-slate-100 overflow-hidden flex flex-col max-h-[92vh] transition-all relative"
+        className="w-full max-w-lg bg-slate-950/95 rounded-2xl sm:rounded-3xl shadow-[0_0_60px_rgba(0,240,255,0.3)] border-2 border-cyan-500/40 text-slate-100 overflow-hidden flex flex-col max-h-[92vh] transition-all relative"
         onClick={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
         onTouchEnd={(e) => e.stopPropagation()}
       >
         {/* Futuristic Cyber Top Bar */}
-        <div className="bg-gradient-to-r from-slate-900 via-cyan-950/50 to-slate-900 px-5 py-3 border-b border-cyan-500/30 flex items-center justify-between shrink-0 font-mono text-xs">
+        <div className="bg-gradient-to-r from-slate-900 via-cyan-950/50 to-slate-900 px-4 py-3 sm:px-5 sm:py-3.5 border-b border-cyan-500/30 flex items-center justify-between shrink-0 font-mono text-xs">
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping shadow-[0_0_10px_#00F0FF]" />
             <span className="font-bold text-cyan-300 tracking-wider">
@@ -226,9 +232,9 @@ export function FuturisticWelcomeWindow({
           </div>
         ) : phase === 'intro' ? (
           /* PHASE 1: GAME INTRO & OVERVIEW */
-          <div className="p-6 text-center space-y-5 font-mono overflow-y-auto flex flex-col items-center">
+          <div className="p-5 sm:p-6 text-center space-y-4 sm:space-y-5 font-mono overflow-y-auto flex flex-col items-center">
             {/* Holographic Radar Visualizer */}
-            <div className="relative w-36 h-36 mx-auto flex items-center justify-center">
+            <div className="relative w-28 h-28 sm:w-36 sm:h-36 mx-auto flex items-center justify-center">
               <div
                 className="absolute inset-0 rounded-full border border-cyan-500/30 animate-spin"
                 style={{ animationDuration: '15s' }}
@@ -237,13 +243,13 @@ export function FuturisticWelcomeWindow({
                 className="absolute inset-2 rounded-full border border-purple-500/30 animate-spin"
                 style={{ animationDuration: '8s', animationDirection: 'reverse' }}
               />
-              <div className="relative w-24 h-24 rounded-2xl bg-gradient-to-tr from-cyan-900/60 to-purple-900/60 border-2 border-cyan-400 flex items-center justify-center shadow-[0_0_30px_rgba(0,240,255,0.4)]">
-                <span className="text-4xl">⚡</span>
+              <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-gradient-to-tr from-cyan-900/60 to-purple-900/60 border-2 border-cyan-400 flex items-center justify-center shadow-[0_0_30px_rgba(0,240,255,0.4)]">
+                <span className="text-3xl sm:text-4xl">⚡</span>
               </div>
             </div>
 
             <div className="space-y-2">
-              <h1 className="text-3xl sm:text-4xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-white to-purple-400 uppercase drop-shadow-[0_0_25px_rgba(0,240,255,0.5)]">
+              <h1 className="text-2xl sm:text-4xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-white to-purple-400 uppercase drop-shadow-[0_0_25px_rgba(0,240,255,0.5)]">
                 CYBER FLAP 2099
               </h1>
               <p className="text-xs text-slate-300 max-w-sm mx-auto font-medium leading-relaxed">
@@ -255,7 +261,7 @@ export function FuturisticWelcomeWindow({
               <button
                 id="welcome-advance-btn"
                 onClick={() => setPhase('auth')}
-                className="w-full py-3.5 px-4 bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-slate-950 font-black rounded-xl uppercase text-xs tracking-wider transition-all duration-200 shadow-[0_0_30px_rgba(0,240,255,0.4)] flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+                className="w-full py-3 sm:py-3.5 px-4 bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-slate-950 font-black rounded-xl uppercase text-xs tracking-wider transition-all duration-200 shadow-[0_0_30px_rgba(0,240,255,0.4)] flex items-center justify-center gap-2 cursor-pointer active:scale-98"
               >
                 <Zap className="w-4 h-4 fill-current text-slate-950" />
                 <span>PILOT SIGN IN / SIGN UP</span>
@@ -280,7 +286,7 @@ export function FuturisticWelcomeWindow({
           </div>
         ) : (
           /* PHASE 2: PILOT USERNAME & PASSWORD AUTHENTICATION */
-          <div className="p-5 sm:p-6 space-y-4 font-mono overflow-y-auto">
+          <div className="p-4 sm:p-6 space-y-4 font-mono overflow-y-auto">
             {/* Feedback Banners */}
             {logoutSuccess && (
               <div className="p-3 rounded-2xl bg-amber-950/80 border border-amber-400 text-amber-200 text-xs flex items-center gap-2.5 shadow-[0_0_20px_rgba(245,158,11,0.3)] animate-in fade-in">
@@ -291,6 +297,13 @@ export function FuturisticWelcomeWindow({
                     Callsign deactivated. Telemetry reverted to Cadet (Guest) flight mode.
                   </p>
                 </div>
+              </div>
+            )}
+
+            {avatarUpdateSuccess && (
+              <div className="p-2.5 rounded-xl bg-emerald-950/80 border border-emerald-400 text-emerald-200 text-xs flex items-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.3)] animate-in fade-in">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="font-bold">PILOT INSIGNIA UPDATED & STREAMED!</span>
               </div>
             )}
 
@@ -316,7 +329,6 @@ export function FuturisticWelcomeWindow({
                   </div>
                 </div>
 
-                {/* Helpful 1-Click Action Button when username exists or not found */}
                 {errorCode === 'EXISTS' && (
                   <button
                     type="button"
@@ -351,7 +363,7 @@ export function FuturisticWelcomeWindow({
 
             {isRegistered && profile ? (
               /* Already Logged In Card */
-              <div className="p-4 rounded-2xl bg-slate-900/80 border border-cyan-500/40 space-y-3">
+              <div className="p-4 rounded-2xl bg-slate-900/80 border border-cyan-500/40 space-y-3.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] uppercase font-bold text-cyan-400 bg-cyan-950/80 border border-cyan-500/40 px-2.5 py-0.5 rounded-md flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
@@ -363,15 +375,16 @@ export function FuturisticWelcomeWindow({
                 </div>
 
                 <div className="flex items-center gap-3.5 pt-1">
-                  <div
-                    className="w-12 h-12 rounded-full border-2 border-white flex items-center justify-center text-xl shadow-[0_0_15px_rgba(0,240,255,0.4)] shrink-0"
-                    style={{ backgroundColor: profile.photoURL || '#00F0FF' }}
-                  >
-                    {profile.displayName.charAt(0).toUpperCase()}
-                  </div>
+                  <PilotAvatar
+                    photoURL={profile.photoURL}
+                    name={profile.displayName}
+                    size="lg"
+                    showGlow={true}
+                  />
                   <div className="min-w-0 flex-1">
-                    <p className="font-black text-white text-base truncate">
-                      {profile.displayName}
+                    <p className="font-black text-white text-base truncate flex items-center gap-1.5">
+                      <span>{profile.displayName}</span>
+                      <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
                     </p>
                     <p className="text-[10px] text-cyan-400 font-mono truncate">
                       CALLSIGN ID: @{profile.displayName.toLowerCase()}
@@ -385,6 +398,42 @@ export function FuturisticWelcomeWindow({
                         {profile.multiplayerWins} duels won
                       </span>
                     </div>
+                  </div>
+                </div>
+
+                {/* Instant Insignia Logo Changer for Logged In Pilot */}
+                <div className="pt-2 border-t border-slate-800 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1">
+                      <Palette className="w-3 h-3 text-cyan-400" />
+                      <span>Switch Pilot Insignia Badge</span>
+                    </span>
+                    <span className="text-[9px] text-cyan-400/80 font-mono">1-Tap Live Sync</span>
+                  </div>
+                  <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
+                    {PILOT_AVATARS.map((av) => {
+                      const isSelected =
+                        profile.photoURL === av.id ||
+                        profile.photoURL?.toLowerCase() === av.color.toLowerCase();
+                      return (
+                        <button
+                          key={av.id}
+                          type="button"
+                          onClick={() => handleAvatarChangeForLoggedIn(av.id)}
+                          className={`p-1.5 rounded-xl border flex flex-col items-center justify-center transition-all cursor-pointer ${
+                            isSelected
+                              ? 'border-white bg-cyan-950/80 scale-105 shadow-[0_0_15px_rgba(0,240,255,0.5)]'
+                              : 'border-slate-800 bg-slate-950/60 hover:border-slate-700 opacity-70 hover:opacity-100'
+                          }`}
+                          title={av.name}
+                        >
+                          <span className="text-base leading-none">{av.icon}</span>
+                          <span className="text-[8px] text-slate-300 font-mono truncate mt-0.5">
+                            {av.label.split('-')[0]}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -403,7 +452,7 @@ export function FuturisticWelcomeWindow({
                       id="welcome-signout-btn"
                       type="button"
                       onClick={handleLogoutClick}
-                      className="py-3 px-3.5 bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-500/50 rounded-xl text-xs transition-all cursor-pointer flex items-center gap-1 active:scale-95"
+                      className="py-3 px-3.5 bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-500/50 rounded-xl text-xs transition-all cursor-pointer flex items-center gap-1 active:scale-95 shrink-0"
                       title="Sign Out of Callsign"
                     >
                       <LogOut className="w-3.5 h-3.5" />
@@ -452,21 +501,9 @@ export function FuturisticWelcomeWindow({
                   </button>
                 </div>
 
-                <div className="text-center space-y-1">
-                  <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-wide">
-                    {authMode === 'signin'
-                      ? 'PILOT SIGN IN // ENTER COCKPIT'
-                      : 'REGISTER CALLSIGN // GLOBAL LEADERBOARD'}
-                  </h3>
-                  <p className="text-[11px] text-slate-300 leading-relaxed">
-                    {authMode === 'signin'
-                      ? 'Enter your registered Callsign and Password to sync your high score.'
-                      : 'Set your unique Callsign and Password to start your pilot career on the Leaderboard.'}
-                  </p>
-                </div>
-
-                <form onSubmit={handleSubmit} className="space-y-3 text-left">
-                  {/* Callsign / Username Input */}
+                {/* Main Form Fields */}
+                <form onSubmit={handleSubmit} className="space-y-3.5">
+                  {/* Callsign Input */}
                   <div className="space-y-1">
                     <label className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1">
                       <User className="w-3 h-3 text-cyan-400" />
@@ -517,23 +554,25 @@ export function FuturisticWelcomeWindow({
                   {authMode === 'signup' && (
                     <div className="space-y-1.5 pt-1">
                       <span className="text-[10px] text-slate-400 font-bold uppercase block">
-                        Choose Pilot Insignia Badge
+                        Choose Pilot Insignia Logo
                       </span>
-                      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                      <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5 pb-1">
                         {PILOT_AVATARS.map((av, idx) => (
                           <button
                             key={av.id}
                             type="button"
                             onClick={() => setSelectedAvatarIdx(idx)}
-                            className={`w-9 h-9 rounded-full border-2 flex items-center justify-center text-sm transition-all cursor-pointer shrink-0 ${
+                            className={`p-1.5 rounded-xl border flex flex-col items-center justify-center transition-all cursor-pointer ${
                               selectedAvatarIdx === idx
-                                ? 'border-white scale-110 shadow-[0_0_15px_#00F0FF]'
-                                : 'border-slate-700 opacity-60 hover:opacity-100'
+                                ? 'border-white bg-purple-950/80 scale-105 shadow-[0_0_15px_#A855F7]'
+                                : 'border-slate-800 bg-slate-950/60 opacity-60 hover:opacity-100 hover:border-slate-700'
                             }`}
-                            style={{ backgroundColor: av.color }}
-                            title={av.label}
+                            title={av.name}
                           >
-                            {av.icon}
+                            <span className="text-base leading-none">{av.icon}</span>
+                            <span className="text-[8px] text-slate-300 font-mono truncate mt-0.5">
+                              {av.label.split('-')[0]}
+                            </span>
                           </button>
                         ))}
                       </div>
@@ -548,52 +587,28 @@ export function FuturisticWelcomeWindow({
                     className={`w-full py-3.5 px-4 font-black rounded-xl uppercase font-mono text-xs tracking-wider transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-lg active:scale-98 mt-2 ${
                       authMode === 'signup'
                         ? 'bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-400 hover:to-indigo-500 text-white shadow-[0_0_20px_rgba(168,85,247,0.4)]'
-                        : 'bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 shadow-[0_0_20px_rgba(0,240,255,0.4)]'
+                        : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 shadow-[0_0_20px_rgba(0,240,255,0.4)]'
                     }`}
                   >
                     {loading ? (
-                      <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                        <span>PROCESSING TELEMETRY...</span>
-                      </div>
+                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
                     ) : authMode === 'signup' ? (
                       <>
                         <UserPlus className="w-4 h-4" />
-                        <span>REGISTER CALLSIGN & ENTER COCKPIT</span>
+                        <span>REGISTER CALLSIGN & LAUNCH</span>
                       </>
                     ) : (
                       <>
                         <LogIn className="w-4 h-4" />
-                        <span>AUTHENTICATE & ENTER COCKPIT</span>
+                        <span>SIGN IN TO CALLSIGN</span>
                       </>
                     )}
                   </button>
                 </form>
-
-                {/* Always Available Guest Mode Option */}
-                <div className="pt-2 border-t border-slate-800/80 text-center space-y-2">
-                  <button
-                    id="welcome-guest-btn"
-                    type="button"
-                    onClick={handleGuestBypass}
-                    className="w-full py-2.5 px-3 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 hover:border-cyan-500/40 rounded-xl text-xs font-mono transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <span>FLY AS GUEST / CADET</span>
-                    <span className="text-slate-500 text-[10px]">
-                      (Instant offline flight)
-                    </span>
-                  </button>
-                </div>
               </div>
             )}
           </div>
         )}
-
-        {/* Footer Info */}
-        <div className="px-6 py-2.5 bg-slate-900/80 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500 font-mono shrink-0">
-          <span>CYBER FLAP QUANTUM MATRIX</span>
-          <span className="text-cyan-400/80 font-bold">PRESS [SPACE] TO THRUST</span>
-        </div>
       </div>
     </div>
   );

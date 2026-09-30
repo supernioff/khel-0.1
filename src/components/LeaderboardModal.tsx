@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Trophy, X, Sparkles, Zap, ShieldCheck, RotateCcw, UserPlus } from 'lucide-react';
 import { getLeaderboard } from '../lib/gameService';
 import type { LeaderboardEntry, UserProfile } from '../types/game';
+import { PilotAvatar } from './PilotAvatar';
 
 interface Props {
   isOpen: boolean;
@@ -197,24 +198,12 @@ export function LeaderboardModal({
                 >
                   <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                     {rankBadge}
-                    {player.photoURL && player.photoURL.startsWith('#') ? (
-                      <div
-                        className="w-7 h-7 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm font-black border border-white/60 shrink-0 text-slate-950 shadow-xs"
-                        style={{ backgroundColor: player.photoURL }}
-                      >
-                        {player.displayName.charAt(0).toUpperCase()}
-                      </div>
-                    ) : player.photoURL && player.photoURL.startsWith('http') ? (
-                      <img
-                        src={player.photoURL}
-                        alt={player.displayName}
-                        className="w-7 h-7 sm:w-9 sm:h-9 rounded-full object-cover border border-cyan-500/40 shrink-0"
-                      />
-                    ) : (
-                      <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-slate-800 text-cyan-400 font-black flex items-center justify-center text-xs sm:text-sm border border-cyan-500/30 shrink-0">
-                        {player.displayName.charAt(0).toUpperCase()}
-                      </div>
-                    )}
+                    <PilotAvatar
+                      photoURL={player.photoURL}
+                      name={player.displayName}
+                      size="sm"
+                      showGlow={isCurrent}
+                    />
                     <div className="min-w-0">
                       <p className="font-bold text-white text-[11px] sm:text-xs truncate flex items-center gap-1.5">
                         <span className="truncate max-w-[110px] sm:max-w-[170px]">{player.displayName}</span>

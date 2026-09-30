@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import type { MultiplayerRoom, UserProfile } from '../types/game';
 import type { User } from 'firebase/auth';
+import { PilotAvatar } from './PilotAvatar';
 import {
   createMultiplayerRoom,
   joinMultiplayerRoomByCode,
@@ -187,14 +188,17 @@ export function MultiplayerLobby({
           </p>
           <div className="grid grid-cols-2 gap-3">
             {/* Host Pilot */}
-            <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-amber-500/40 space-y-2 text-center">
+            <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-amber-500/40 space-y-2 text-center flex flex-col items-center">
               <span className="text-[10px] font-bold text-amber-400 bg-amber-950/40 border border-amber-500/40 px-2 py-0.5 rounded-full">
                 HOST PILOT
               </span>
-              <div className="w-12 h-12 mx-auto rounded-full bg-gradient-to-tr from-amber-500 to-amber-600 text-slate-950 font-black flex items-center justify-center text-lg border-2 border-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.4)]">
-                {activeRoom.host.displayName.charAt(0).toUpperCase()}
-              </div>
-              <p className="font-bold text-white text-xs truncate">
+              <PilotAvatar
+                photoURL={activeRoom.host.photoURL}
+                name={activeRoom.host.displayName}
+                size="lg"
+                showGlow={true}
+              />
+              <p className="font-bold text-white text-xs truncate max-w-full">
                 {activeRoom.host.displayName}
               </p>
               <p className="text-[10px] text-emerald-400 font-bold flex items-center justify-center gap-1">
@@ -203,16 +207,19 @@ export function MultiplayerLobby({
             </div>
 
             {/* Challenger Pilot */}
-            <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-purple-500/40 space-y-2 text-center">
+            <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-purple-500/40 space-y-2 text-center flex flex-col items-center">
               <span className="text-[10px] font-bold text-purple-400 bg-purple-950/40 border border-purple-500/40 px-2 py-0.5 rounded-full">
                 CHALLENGER
               </span>
               {hasGuest && activeRoom.guest ? (
                 <>
-                  <div className="w-12 h-12 mx-auto rounded-full bg-gradient-to-tr from-purple-500 to-indigo-600 text-white font-black flex items-center justify-center text-lg border-2 border-purple-400 shadow-[0_0_10px_rgba(168,85,247,0.4)]">
-                    {activeRoom.guest.displayName.charAt(0).toUpperCase()}
-                  </div>
-                  <p className="font-bold text-white text-xs truncate">
+                  <PilotAvatar
+                    photoURL={activeRoom.guest.photoURL}
+                    name={activeRoom.guest.displayName}
+                    size="lg"
+                    showGlow={true}
+                  />
+                  <p className="font-bold text-white text-xs truncate max-w-full">
                     {activeRoom.guest.displayName}
                   </p>
                   <p className="text-[10px] text-emerald-400 font-bold flex items-center justify-center gap-1">

@@ -124,3 +124,23 @@ export interface BirdCraft {
   thrusterColor: string;
   wingSpanFactor: number;
 }
+
+export interface PilotAvatarOption {
+  id: string;
+  label: string;
+  color: string;
+  icon: string;
+  name: string;
+}
+
+export const PILOT_AVATARS: PilotAvatarOption[] = [
+  { id: 'valkyrie', label: 'Valkyrie-01', color: '#00F0FF', icon: '⚡', name: 'Lightning Core' },
+  { id: 'solaris', label: 'Solar-Pyro', color: '#FF4500', icon: '🔥', name: 'Plasma Flare' },
+  { id: 'shadow', label: 'Void-Nox', color: '#A855F7', icon: '🌑', name: 'Quantum Void' },
+  { id: 'chrono', label: 'Flora-Bloom', color: '#10B981', icon: '🌿', name: 'Cyber Emerald' },
+  { id: 'titan', label: 'Aegis-Guard', color: '#F59E0B', icon: '🛡️', name: 'Titan Aegis' },
+  { id: 'phase', label: 'Mirage-Astra', color: '#00FFA3', icon: '✨', name: 'Stellar Pulse' },
+  { id: 'crown', label: 'Apex-Overlord', color: '#F43F5E', icon: '👑', name: 'Apex Crown' },
+  { id: 'cyborg', label: 'Mecha-Spectre', color: '#38BDF8', icon: '🤖', name: 'Mecha Unit' },
+];
+
